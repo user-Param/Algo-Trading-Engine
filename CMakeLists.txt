@@ -9,6 +9,7 @@ if(NOT Boost_FOUND)
     find_package(Boost QUIET)
 endif()
 
+find_package(OpenSSL REQUIRED)
 find_package(PostgreSQL QUIET)
 find_package(libpqxx QUIET)
 
@@ -25,6 +26,7 @@ add_executable(algo_engine
 )
 
 target_include_directories(algo_engine PRIVATE
+    ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/algos/include
     ${CMAKE_SOURCE_DIR}/engine/include
     ${CMAKE_SOURCE_DIR}/feed/include
@@ -36,7 +38,7 @@ target_include_directories(algo_engine PRIVATE
 )
 
 if(Boost_FOUND)
-    target_link_libraries(algo_engine PRIVATE Boost::headers)
+    target_link_libraries(algo_engine PRIVATE Boost::headers OpenSSL::SSL OpenSSL::Crypto)
     target_compile_definitions(algo_engine PRIVATE BOOST_ASIO_NO_DEPRECATED)
     message(STATUS "Boost found: ${Boost_DIR}")
 else()
