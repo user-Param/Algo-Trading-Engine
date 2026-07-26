@@ -19,6 +19,7 @@
 
 #include "engine/include/engine.h"
 #include "algos/include/TradeSignal.h"
+#include "common/include/logger.h"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -33,7 +34,8 @@ struct EngineContext {
 
 static std::shared_ptr<EngineContext> global_engine;
 
-static void handle_signal(int) {
+static void handle_signal(int sig) {
+    LOG("Server", "Received signal " << sig << ", shutting down");
     if (global_engine) global_engine->engine.stop();
 }
 
@@ -311,22 +313,28 @@ private:
             return fail(ec, "read");
 
         std::string msg = beast::buffers_to_string(buffer_.data());
+        LOG("WSEngine", "Received: " << msg);
         std::string response;
 
         if (msg == "status") {
             response = global_engine->engine.isRunning() ? "running" : "stopped";
+            LOG("WSEngine", "Status: " << response);
         } else if (msg.find("subscribe ") == 0) {
             std::string symbol = msg.substr(10);
             global_engine->engine.getFeedManager().subscribe_topics({symbol});
             response = "subscribed to " + symbol;
+            LOG("WSEngine", "Subscribe: " << symbol);
         } else if (msg == "start") {
             global_engine->engine.start();
             response = "engine started";
+            LOG("WSEngine", "Start command processed");
         } else if (msg == "stop") {
             global_engine->engine.stop();
             response = "engine stopped";
+            LOG("WSEngine", "Stop command processed");
         } else {
             response = "unknown command";
+            LOG("WSEngine", "Unknown command: " << msg);
         }
 
         ws_.text(true);
@@ -655,7 +663,7 @@ private:
         }
         else
         {
-            std::cout << "New connection from: " << socket.remote_endpoint() << std::endl;
+            LOG("Server", "New HTTP connection from " << socket.remote_endpoint());
             std::make_shared<http_session>(
                 std::move(socket),
                 doc_root_)->run();
@@ -677,8 +685,9 @@ int main(int argc, char* argv[])
     }
 
     global_engine = std::make_shared<EngineContext>();
+    LOG("Server", "EngineContext created");
 
-    std::cout << "Server started at: " << argv[1] << ":" << argv[2] << std::endl;
+    LOG("Server", "Listening on " << argv[1] << ":" << argv[2]);
 
     auto const address = net::ip::make_address(argv[1]);
     auto const port = static_cast<unsigned short>(std::atoi(argv[2]));
