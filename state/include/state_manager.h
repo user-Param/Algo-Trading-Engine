@@ -32,6 +32,7 @@ public:
     StateManager();
     ~StateManager();
 
+    bool connect();
     bool connect(const std::string& connString);
     void disconnect();
     bool isConnected() const;
