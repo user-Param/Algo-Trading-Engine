@@ -1,9 +1,13 @@
 #include "../include/smart_order_router.h"
+#include "common/include/logger.h"
 #include <iostream>
 
-SOR::SOR() : connected_(false) {}
+SOR::SOR() : connected_(false) {
+    LOG("SOR", "Constructed");
+}
 
 SOR::~SOR() {
+    LOG("SOR", "Destroying");
     disconnect_route();
 }
 
@@ -11,15 +15,15 @@ void SOR::connect_route(const std::string& url) {
     try {
         route_url_ = url;
         connected_ = true;
-        std::cout << "SOR: Connected to route " << url << std::endl;
+        LOG("SOR", "Connected to route: " << url);
     } catch (const std::exception& e) {
-        std::cerr << "SOR: Failed to connect: " << e.what() << std::endl;
+        ERR("SOR", "Failed to connect: " << e.what());
     }
 }
 
 void SOR::disconnect_route() {
     connected_ = false;
-    std::cout << "SOR: Disconnected from route" << std::endl;
+    LOG("SOR", "Disconnected from route");
 }
 
 bool SOR::is_connected() const {
@@ -28,17 +32,17 @@ bool SOR::is_connected() const {
 
 void SOR::send_order(uint64_t price, uint64_t quantity, int leverage, const std::string& side) {
     try {
-        std::cout << "SOR: Order sent - " << side << " " << quantity << " @ " << price
-                  << " (leverage: " << leverage << "x)" << std::endl;
+        LOG("SOR", "Order sent - " << side << " " << quantity << " @ " << price
+            << " (leverage: " << leverage << "x)");
     } catch (const std::exception& e) {
-        std::cout << "SOR: Failed to send order: " << e.what() << std::endl;
+        ERR("SOR", "Failed to send order: " << e.what());
     }
 }
 
 void SOR::send_signal(const std::string& signal_json) {
     try {
-        std::cout << "SOR: Publishing signal: " << signal_json << std::endl;
+        LOG("SOR", "Publishing signal: " << signal_json);
     } catch (const std::exception& e) {
-        std::cout << "SOR: Failed to publish signal: " << e.what() << std::endl;
+        ERR("SOR", "Failed to publish signal: " << e.what());
     }
 }
