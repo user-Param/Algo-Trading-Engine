@@ -659,6 +659,10 @@ private:
     {
         if(ec)
         {
+            if (ec == net::error::operation_aborted || ec == beast::errc::bad_file_descriptor || ec == beast::errc::invalid_argument) {
+                LOG("Server", "Acceptor closed, stopping accept loop");
+                return;
+            }
             fail(ec, "accept");
         }
         else

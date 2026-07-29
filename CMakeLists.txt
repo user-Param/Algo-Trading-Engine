@@ -38,7 +38,7 @@ target_include_directories(algo_engine PRIVATE
 )
 
 if(Boost_FOUND)
-    target_link_libraries(algo_engine PRIVATE Boost::headers OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(algo_engine PRIVATE Boost::headers)
     target_compile_definitions(algo_engine PRIVATE BOOST_ASIO_NO_DEPRECATED)
     message(STATUS "Boost found: ${Boost_DIR}")
 else()
