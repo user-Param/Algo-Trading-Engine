@@ -2,21 +2,44 @@
 
 import { useMemo } from "react";
 
+type ViewMode = "alpha" | "terminal" | "lab" | "inventory" | "trade-history" | "help";
 
-export default function Navbar() {
-  
+interface NavbarProps {
+  currentView?: ViewMode;
+  onViewChange?: (view: ViewMode) => void;
+}
 
+export default function Navbar({ 
+  currentView = "alpha", 
+  onViewChange = () => {} 
+}: NavbarProps) {
   
+  const navItems: { id: ViewMode; label: string }[] = [
+    { id: "alpha", label: "Alpha" },
+    { id: "terminal", label: "Terminal" },
+    { id: "lab", label: "Lab" },
+    { id: "inventory", label: "Inventory" },
+    { id: "trade-history", label: "Trade History" },
+    { id: "help", label: "Help" },
+  ];
 
   return (
     <div className="bg-[#101010] text-white p-4 w-full max-h-16 flex items-center justify-between">
       <div className="flex gap-3">
         <h1 className="text-xl font-bold">Protype</h1>
-        <span className="bg-[#161616] rounded px-4">History</span>
-        <span className="bg-[#161616] rounded px-4">Tools</span>
-        <span className="bg-[#161616] rounded px-4">Windows</span>
-        <span className="bg-[#161616] rounded px-4">Layouts</span>
-        <span className="bg-[#161616] rounded px-4">Help</span>
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => onViewChange(item.id)}
+            className={`rounded px-4 py-1 transition-colors ${
+              currentView === item.id
+                ? "bg-blue-600 text-white"
+                : "bg-[#161616] hover:bg-[#252525]"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
       <div className="flex gap-3">
         <span className="bg-[#161616] rounded px-4">
