@@ -1,10 +1,12 @@
 #include "../include/engine.h"
+#include "../../algos/include/test_algo1.h"
 #include "common/include/logger.h"
 #include <iostream>
 
 Engine::Engine() {
     LOG("Engine", "Constructed");
     algo_manager_.setFeedManager(&feed_manager_);
+    algo_manager_.registerAlgoType("test1", createTestAlgo1);
     state_manager_.connect();
 }
 
