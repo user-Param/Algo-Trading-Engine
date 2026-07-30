@@ -25,6 +25,8 @@ struct MarketData {
     int64_t timestamp;
 };
 
+using MarketDataCallback = std::function<void(const MarketData&)>;
+
 class FeedManager {
 public:
     FeedManager();
@@ -44,12 +46,14 @@ public:
 
     MarketData get_feed(const std::string& symbol);
 
-    void set_callback(std::function<void(const MarketData&)> callback);
-    void add_observer(std::function<void(const MarketData&)> observer);
+    void set_market_data_callback(MarketDataCallback callback);
+    void register_observer(MarketDataCallback observer);
 
 private:
     void schedule_reconnect();
     void do_read();
+    void on_read(boost::beast::error_code ec, std::size_t bytes);
+    void handle_message(const std::string& msg);
 
     bool backtest_mode_ = false;
     std::atomic<bool> connected_{false};
