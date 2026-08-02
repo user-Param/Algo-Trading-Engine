@@ -14,7 +14,6 @@ import Performance from "./cards/performance/performance";
 import Latency from "./cards/latency/latency";
 import Health from "./cards/health/health";
 import Throughput from "./cards/throughput/throughput";
-import Exchange from "./cards/exchange/exchange";
 import Pipeline from "./cards/pipeline/pipeline";
 import Pannel from "./cards/pannel/pannel";
 import Network from "./cards/network/network";
@@ -35,41 +34,57 @@ import Lab from "./lab/page";
 import Inventory from "./inventory/page";
 import Help from "./history/page";
 import Positions from "./cards/positions";
+import Orderbook from "./cards/exchange/orderbook";
 
 interface CardItem {
   id: string;
   title: string;
-  content: React.ReactNode;
 }
 
-type ViewMode = "alpha" | "terminal" | "lab" | "inventory" | "trade-history" | "help";
+type ViewMode = "terminal" | "alpha" | "lab" | "inventory" | "trade-history" | "help";
 
 export default function Home() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const [currentView, setCurrentView] = useState<ViewMode>("alpha");
+  const [currentView, setCurrentView] = useState<ViewMode>("terminal");
+  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
 
   const toggleSidebar = () => setSidebarExpanded((prev) => !prev);
 
-  const [cards, setCards] = useState<CardItem[]>([
-    { id: 'chart', title: 'Charts', content: <Chart /> },
-    { id: 'health', title: 'Engine Health', content: <Health /> },
-    { id: 'throughput', title: 'Throughput', content: <Throughput /> },
-    { id: 'latency', title: 'Latency', content: <Latency /> },
-    { id: 'performance', title: 'Performance', content: <Performance /> },
-    { id: 'exchange', title: 'Exchange Orderbook', content: <Exchange /> },
-    { id: 'algorithms', title: 'Algorithm Manager', content: <AlgoManager /> },
-    { id: 'risk', title: 'Risk Monitor', content: <RiskMonitor /> },
-    { id: 'backtest', title: 'Backtest Control', content: <Backtest /> },
-    { id: 'positions', title: 'Positions', content: <Positions /> },
-    { id: 'network', title: 'Network', content: <Network /> },
-    { id: 'database', title: 'Database', content: <Database /> },
-    { id: 'event', title: 'Event', content: <Event /> },
-    { id: 'insight', title: 'Insight', content: <Insight /> },
-    { id: 'config', title: 'Config', content: <Config /> },
-    { id: 'session', title: 'Session', content: <Session /> },
-    { id: 'terminal', title: 'Terminal', content: <Terminal /> },
-    { id: 'history', title: 'Trade History', content: <TradeHistory /> },
-  ]);
+  const CARD_DEFS: CardItem[] = [
+    { id: 'chart', title: 'Charts' },
+    { id: 'exchange', title: 'Orderbook' },
+    { id: 'algorithms', title: 'Algorithm Manager' },
+    { id: 'risk', title: 'Risk Monitor' },
+    { id: 'positions', title: 'Positions' },
+    { id: 'insight', title: 'Insight' },
+    { id: 'terminal', title: 'Terminal' },
+    { id: 'history', title: 'Trade History' },
+  ];
+
+  const renderCardContent = (id: string) => {
+    switch (id) {
+      case 'chart':
+        return <Chart selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />;
+      case 'exchange':
+        return <Orderbook selectedSymbol={selectedSymbol} />;
+      case 'algorithms':
+        return <AlgoManager />;
+      case 'risk':
+        return <RiskMonitor />;
+      case 'positions':
+        return <Positions />;
+      case 'insight':
+        return <Insight />;
+      case 'terminal':
+        return <Terminal selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol}/>;
+      case 'history':
+        return <TradeHistory />;
+      default:
+        return null;
+    }
+  };
+
+  const [cards, setCards] = useState<CardItem[]>(CARD_DEFS);
 
   const [minimized, setMinimized] = useState<Record<string, boolean>>({});
   const [refreshTriggers, setRefreshTriggers] = useState<Record<string, number>>({});
@@ -92,7 +107,7 @@ export default function Home() {
   // Render the appropriate view based on currentView
   const renderView = () => {
     switch (currentView) {
-      case "alpha":
+      case "terminal":
         return (
           <DashboardGrid>
             {cards.map((card) => (
@@ -106,15 +121,15 @@ export default function Home() {
                 isMinimized={minimized[card.id] || false}
               >
                 <div key={refreshTriggers[card.id] || 0}>
-                  {card.content}
+                  {renderCardContent(card.id)}
                 </div>
               </Card>
             ))}
           </DashboardGrid>
         );
       
-      case "terminal":
-        return <Terminal />;
+      case "alpha":
+        return //<Terminal />;
       
       case "lab":
         return <Lab />;
@@ -123,7 +138,7 @@ export default function Home() {
         return <Inventory />;
       
       case "trade-history":
-        return <History />;
+        return <TradeHistory />;
       
       case "help":
         return <Help />;

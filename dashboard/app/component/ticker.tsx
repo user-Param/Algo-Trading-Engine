@@ -58,7 +58,7 @@ export default function Ticker() {
         style={{ animation: `scroll ${speed}s linear infinite` }}
       >
         {content.map((item, i) => (
-          <span key={i} className="inline-flex items-center mx-4 shrink-0 gap-2 text-xs">
+          <span key={i} className="inline-flex bg-[#202020] p-4 items-center mx-2 shrink-0 gap-2 text-xs">
             <span className=" font-semibold text-xs">{item.symbol}</span>
             <span className=" text-xs">{item.price}</span>
             <div className="flex flex-col">
@@ -66,7 +66,6 @@ export default function Ticker() {
             <span className=" text-[7px]">{item.ask}</span>
             </div>
             <span className=" text-[6px]">{item.chg}</span>
-            <span className=" text-xs">|</span>
           </span>
         ))}
       </div>

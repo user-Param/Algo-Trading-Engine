@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
 
-const HOST = "datafeed.fun";
+const HOST = "localhost:8765"; // Change this to your actual host and port
 const BASE_URL = `http://${HOST}`;
 const WS_URL = `ws://${HOST}`;
 

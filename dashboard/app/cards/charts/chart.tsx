@@ -1,242 +1,198 @@
 "use client";
 
-import * as echarts from "echarts";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createChart, ColorType, CandlestickSeries } from "lightweight-charts";
 import { useDatafeed } from "@/app/lib/datafeed-context";
 
-// Generate a random walk price series for dummy data
-function generateDummyPrice(prevPrice: number): number {
-  const change = (Math.random() - 0.5) * 2; // change between -1 and +1
-  let newPrice = prevPrice + change;
-  // Keep price within reasonable range for BTC
-  if (newPrice < 500) newPrice = 500 + Math.random() * 500;
-  if (newPrice > 700) newPrice = 700 - Math.random() * 500;
-  return Math.round(newPrice * 100) / 100;
+
+interface ChartProps {
+  selectedSymbol: string;
+  onSymbolChange: (symbol: string) => void;
 }
 
-// Dummy symbols to show when real data is absent
-const DUMMY_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD"];
 
-export default function Chart() {
-  const chartRef = useRef<HTMLDivElement>(null);
-  const instanceRef = useRef<echarts.ECharts | null>(null);
-  const dataRef = useRef<number[][]>([]);
-  const candleRef = useRef<{
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-  } | null>(null);
-  const userZoomedRef = useRef(false);
-  const [symbol, setSymbol] = useState<string>("");
-  const { tickerData } = useDatafeed();
 
-  // Get list of symbols: real ones if available, otherwise dummy ones
-  const symbols = Object.keys(tickerData).length > 0 
-    ? Object.keys(tickerData) 
-    : DUMMY_SYMBOLS;
+export default function Chart({ selectedSymbol, onSymbolChange }: ChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+  const seriesRef = useRef<any>(null);
 
-  // State to track the last price for dummy data (per symbol)
-  const dummyPriceRef = useRef<Record<string, number>>({});
+  const { tickerData, connected } = useDatafeed();
 
-  // Initialize dummy prices for each symbol if not already set
-  useEffect(() => {
-    symbols.forEach((sym) => {
-      if (!(sym in dummyPriceRef.current)) {
-        // Start dummy price around 65000 for BTC, different for others
-        let base = 65;
-        if (sym.includes("ETH")) base = 30;
-        else if (sym.includes("SOL")) base = 15;
-        else if (sym.includes("XRP")) base = 0.5;
-        dummyPriceRef.current[sym] = base + (Math.random() - 0.5) * 1000;
-      }
-    });
-  }, [symbols]);
 
-  // Set default symbol if not set
-  useEffect(() => {
-    if (!symbol && symbols.length > 0) {
-      setSymbol(symbols[0]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  
+  const symbols = Object.keys(tickerData);
+
+  
+
+  // Candle aggregation
+  const CANDLE_TICKS = 5; // number of price updates per candle
+  const candleBufferRef = useRef<number[]>([]);
+  const candlesRef = useRef<{ time: number; open: number; high: number; low: number; close: number }[]>([]);
+  const lastCandleTimeRef = useRef<number>(0);
+
+
+useEffect(() => {
+  if (!selectedSymbol && symbols.length > 0 && onSymbolChange) {  
+    onSymbolChange(symbols[0]);
+  }
+}, [selectedSymbol, symbols, onSymbolChange]);
+
+ const getPrice = (sym: string): number | null => {
+    const tick = tickerData[sym];
+    if (tick && tick.price > 0) {
+      return tick.price;
     }
-  }, [symbol, symbols]);
+    return null;
+  };
 
-  // Helper to get current price (real or dummy)
-  const getPrice = useCallback((sym: string) => {
-    // 1. Try real data
-    const realTick = tickerData[sym];
-    if (realTick && realTick.price > 0) {
-      return realTick.price;
-    }
-    // 2. Fallback to dummy: generate random walk
-    const last = dummyPriceRef.current[sym] || 65000;
-    const newPrice = generateDummyPrice(last);
-    dummyPriceRef.current[sym] = newPrice;
-    return newPrice;
-  }, [tickerData]);
-
-  // Reset chart data when symbol changes
   useEffect(() => {
-    dataRef.current = [];
-    candleRef.current = null;
-    userZoomedRef.current = false;
-  }, [symbol]);
+    if (!containerRef.current) return;
 
-  // Main chart update
-  useEffect(() => {
-    if (!chartRef.current) return;
-    const chart = echarts.init(chartRef.current, "dark");
-    instanceRef.current = chart;
-
-    const data = dataRef.current;
-
-    chart.on("dataZoom", () => {
-      userZoomedRef.current = true;
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "#0a0a0a" },
+        textColor: "#d1d5db",
+      },
+      grid: {
+        vertLines: { color: "#1f2937" },
+        horzLines: { color: "#1f2937" },
+      },
+      width: containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight || 400,
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+      },
     });
 
-    const windowSize = 80;
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#066bcc",
+      downColor: "#d83b2a",
+      borderVisible: true,
+      wickUpColor: "#066bcc",
+      wickDownColor: "#d83b2a",
+    });
 
-    const update = () => {
-      // Get price (real or dummy)
-      const price = getPrice(symbol);
-      if (!price) return;
+    chartRef.current = chart;
+    seriesRef.current = series;
 
-      // Build candlestick
-      if (!candleRef.current) {
-        candleRef.current = {
-          open: price,
-          high: price,
-          low: price,
-          close: price,
-        };
-      } else {
-        candleRef.current.high = Math.max(candleRef.current.high, price);
-        candleRef.current.low = Math.min(candleRef.current.low, price);
-        candleRef.current.close = price;
+    // Resize handler
+    const resize = () => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight || 400 });
       }
-
-      // Push OHLC: [open, close, low, high] (ECharts order)
-      data.push([
-        candleRef.current.open,
-        candleRef.current.close,
-        candleRef.current.low,
-        candleRef.current.high,
-      ]);
-
-      // Reset for next candle
-      candleRef.current = {
-        open: price,
-        high: price,
-        low: price,
-        close: price,
-      };
-
-      const opt: any = {
-        grid: { top: 8, bottom: 24, left: 8, right: 60 },
-        xAxis: {
-          type: "category",
-          show: true,
-          axisLine: { show: true },
-          axisTick: { show: true },
-          splitLine: { show: false },
-          axisLabel: { fontSize: 10 },
-        },
-        yAxis: {
-          type: "value",
-          show: true,
-          position: "right",
-          splitLine: {
-            show: true,
-            lineStyle: { color: "#333", type: "dashed" },
-          },
-          axisLabel: { fontSize: 10, formatter: (v: any) => v.toFixed(2) },
-        },
-        series: [
-          {
-            type: "candlestick",
-            data,
-            animation: false,
-            markLine: {
-              silent: true,
-              symbol: "none",
-              lineStyle: { color: "#e0e0e0", width: 1 },
-              label: {
-                show: true,
-                formatter: () => price.toFixed(2),
-                position: "end",
-                backgroundColor: "#e0e0e0",
-                color: "#000",
-                padding: [2, 6],
-                borderRadius: 2,
-                fontSize: 11,
-              },
-              data: [{ yAxis: price }],
-            },
-          },
-        ],
-      };
-
-      if (!userZoomedRef.current) {
-        const endVal = data.length - 1;
-        const startVal = Math.max(0, endVal - windowSize + 1);
-        opt.dataZoom = [
-          {
-            type: "inside",
-            xAxisIndex: [0],
-            startValue: startVal,
-            endValue: endVal,
-          },
-          { type: "inside", yAxisIndex: [0] },
-        ];
-      }
-
-      chart.setOption(opt);
     };
-
-    // Run update immediately and then every second
-    update();
-    const interval = setInterval(update, 10000);
-
-    const resize = () => chart.resize();
     window.addEventListener("resize", resize);
 
     return () => {
-      clearInterval(interval);
       window.removeEventListener("resize", resize);
-      chart.dispose();
+      chart.remove();
     };
-  }, [symbol, getPrice]);
+  }, []);
+
+  // --------------------------------------------
+  // Data Update Loop
+  // --------------------------------------------
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    if (!selectedSymbol) return;
+
+    const series = seriesRef.current;
+    const now = Date.now();
+
+    // Get current price
+    const price = getPrice(selectedSymbol);
+    if (price === null) return;
+
+    // Push to buffer
+    candleBufferRef.current.push(price);
+
+    // When buffer reaches threshold, form a candle
+    if (candleBufferRef.current.length >= CANDLE_TICKS) {
+      const prices = candleBufferRef.current;
+      const open = prices[0];
+      const close = prices[prices.length - 1];
+      const high = Math.max(...prices);
+      const low = Math.min(...prices);
+
+      // Use current time (rounded to nearest second) as candle time
+      const time = Math.floor(now / 1000);
+      // Ensure we don't have duplicate timestamps (if updates are faster than 1s)
+      if (time !== lastCandleTimeRef.current) {
+        candlesRef.current.push({ time, open, high, low, close });
+        lastCandleTimeRef.current = time;
+
+        // Keep only last 200 candles
+        if (candlesRef.current.length > 200) {
+          candlesRef.current = candlesRef.current.slice(-200);
+        }
+
+        // Update chart
+        series.setData(candlesRef.current);
+        // Auto-fit time scale if chart is not zoomed
+        if (chartRef.current) {
+          chartRef.current.timeScale().fitContent();
+        }
+      }
+
+      // Reset buffer for next candle
+      candleBufferRef.current = [];
+    }
+
+    // If no data yet, add a placeholder candle? Not needed.
+  }, [tickerData, selectedSymbol, connected]); // Re-run when data changes
+
+  // --------------------------------------------
+  // Reset data on symbol change
+  // --------------------------------------------
+  useEffect(() => {
+    candleBufferRef.current = [];
+    candlesRef.current = [];
+    lastCandleTimeRef.current = 0;
+    if (seriesRef.current) {
+      seriesRef.current.setData([]);
+    }
+  }, [selectedSymbol]);
+
+  // --------------------------------------------
+  // Symbol Dropdown
+  // --------------------------------------------
+  const toggleDropdown = () => setDropdownOpen(!dropdownOpen);
+  const selectSymbol = (sym: string) => {
+    onSymbolChange(sym);
+    setDropdownOpen(false);
+  };
 
   return (
-    <div className="h-full w-full">
-      <div className="relative p-2">
+    <div className="h-[600px] w-full flex flex-col">
+      {/* Symbol Selector */}
+      <div className="absolute p-2 z-10">
         <button
-          onClick={() => setOpen(!open)}
-          className="px-3 py-1 absolute z-1 rounded border border-gray-700"
+          onClick={toggleDropdown}
+          className="px-3 py-1 border border-gray-700 bg-gray-800 text-sm text-gray-200"
         >
-          {symbol || "Select Symbol"}
+          {selectedSymbol || "Select Symbol"}
         </button>
-
-        {open && (
-          <div className="absolute top-10 left-0 bg-[#090909] border border-zinc-700 max-h-64 overflow-y-auto z-50 no-scrollbar">
-            {symbols.map((s) => (
+        {dropdownOpen && (
+          <div className="absolute top-10 left-0 bg-gray-900 border border-gray-700 rounded shadow-lg max-h-48 overflow-y-auto w-36">
+            {symbols.map((sym) => (
               <button
-                key={s}
-                className="block w-full text-left hover:bg-zinc-700 no-scrollbar"
-                onClick={() => {
-                  setSymbol(s);
-                  dataRef.current = [];
-                  candleRef.current = null;
-                  setOpen(false);
-                }}
+                key={sym}
+                className="block w-full text-left px-3 py-1 text-sm hover:bg-gray-700 text-gray-300"
+                onClick={() => selectSymbol(sym)}
               >
-                {s}
+                {sym}
               </button>
             ))}
           </div>
         )}
       </div>
 
-      <div ref={chartRef} className="h-[1000px] w-full" />
+      {/* Chart Container */}
+      <div ref={containerRef} className="h-[600px] w-full" />
     </div>
   );
 }
