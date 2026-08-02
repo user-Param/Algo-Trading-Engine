@@ -21,9 +21,9 @@ const Card: React.FC<CardProps> = ({
   isMinimized = false,
 }) => {
   return (
-    <div className="bg-[#101010] backdrop-blur-sm border border-gray-900 shadow-xl flex flex-col h-full overflow-hidden text-gray-200">
+    <div className="bg-[#101010] backdrop-blur-sm border border-gray-900 shadow-xl flex flex-col h-full overflow-hidden text-gray-200 no-scrollbar">
       {title && (
-        <div className="drag-handle flex items-center justify-between px-3 py-2 border-b border-gray-900 cursor-move">
+        <div className="drag-handle flex items-center justify-between px-3 py-2 border-b border-gray-900 cursor-move no-scrollbar">
           <span className="font-medium text-sm truncate">{title}</span>
           <div className="flex items-center space-x-1">
             {onRefresh && (
@@ -56,7 +56,7 @@ const Card: React.FC<CardProps> = ({
           </div>
         </div>
       )}
-      <div className="flex-1 p-2 overflow-auto">
+      <div className="flex-1 p-2 overflow-auto no-scrollbar">
         {isMinimized ? (
           <div className="flex items-center justify-center h-12 text-gray-500 text-sm">
             — minimized —
