@@ -23,29 +23,19 @@ interface RiskMetrics {
 // ------------------------------------------------------------
 function generateEquityData(
   points: number,
-  startBalance: number = 100,
-  volatility: number = 0.1
+  startBalance: number = 10000,
+  volatility: number = 0.02  // average step as % of current balance
 ): { balance: number; drawdown: number; profitLimit: number }[] {
   const data: { balance: number; drawdown: number; profitLimit: number }[] = [];
   let balance = startBalance;
-  const maxBalance = startBalance * 1.2;   // arbitrary profit limit
-  const minBalance = startBalance * 0.85;  // arbitrary drawdown limit
-
   for (let i = 0; i < points; i++) {
-    // random walk with drift
-    const change = (Math.random() - 0.48) * volatility * balance;
-    balance = Math.max(minBalance, Math.min(maxBalance, balance + change));
-
-    // current drawdown (relative to start)
-    const drawdown = ((startBalance - balance) / startBalance) * 100;
-    // profit limit (relative to start)
+    // Random positive step: between 0 and 2 * volatility * balance
+    const step = Math.random() * volatility * balance * 2;
+    balance += step;
+    // Drawdown is always 0 because balance never decreases
+    const drawdown = 0;
     const profitLimit = ((balance - startBalance) / startBalance) * 100;
-
-    data.push({
-      balance,
-      drawdown: Math.max(0, drawdown),
-      profitLimit: Math.max(0, profitLimit),
-    });
+    data.push({ balance, drawdown, profitLimit });
   }
   return data;
 }
