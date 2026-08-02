@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 type ViewMode = "alpha" | "terminal" | "lab" | "inventory" | "trade-history" | "help";
 
@@ -13,7 +13,7 @@ export default function Navbar({
   currentView = "alpha", 
   onViewChange = () => {} 
 }: NavbarProps) {
-  
+
   const navItems: { id: ViewMode; label: string }[] = [
     { id: "alpha", label: "Alpha" },
     { id: "terminal", label: "Terminal" },
@@ -22,6 +22,11 @@ export default function Navbar({
     { id: "trade-history", label: "Trade History" },
     { id: "help", label: "Help" },
   ];
+
+  const[isRunning, setIsRunning] = useState(false);
+  const handleClick = () =>{
+    setIsRunning(!isRunning);
+  }
 
   return (
     <div className="bg-[#101010] text-white p-4 w-full max-h-16 flex items-center justify-between">
@@ -33,7 +38,7 @@ export default function Navbar({
             onClick={() => onViewChange(item.id)}
             className={`rounded px-4 py-1 transition-colors ${
               currentView === item.id
-                ? "bg-blue-600 text-white"
+                ? "bg-[#242424] text-white"
                 : "bg-[#161616] hover:bg-[#252525]"
             }`}
           >
@@ -42,9 +47,11 @@ export default function Navbar({
         ))}
       </div>
       <div className="flex gap-3">
-        <span className="bg-[#161616] rounded px-4">
-          Uptime {"-"}h
-        </span>
+        <button className="bg-[#161616] rounded px-8 border"
+          onClick={handleClick}
+          >
+          {isRunning ? "Stop" : "Start"}
+        </button>
         <span className="bg-[#161616] rounded px-4">
           Exchange {"-"}
         </span>
