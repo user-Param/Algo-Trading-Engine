@@ -96,7 +96,7 @@ export default function Positions() {
           };
         })
       );
-    }, 10); // 10ms = 100 updates/sec
+    }, 1000); // 10ms = 100 updates/sec
 
     return () => clearInterval(interval);
   }, [isPaused, positions.length]);
@@ -147,7 +147,7 @@ export default function Positions() {
               {/* Side */}
               <span
                 className={`w-10 text-center font-bold ${
-                  pos.side === "long" ? "text-[#00FF00]" : "text-[#FF764e]"
+                  pos.side === "long" ? "text-[#00FF00]" : "text-[#d83b2a]"
                 }`}
               >
                 {pos.side.toUpperCase()}
@@ -168,7 +168,7 @@ export default function Positions() {
               {/* P&L */}
               <span
                 className={`font-mono w-20 text-right font-bold ${
-                  pos.pnl >= 0 ? "text-[#00FF00]" : "text-[#FF764e]"
+                  pos.pnl >= 0 ? "#d83b2a" : "text-[#FF764e]"
                 }`}
               >
                 ${pos.pnl.toFixed(2)}
