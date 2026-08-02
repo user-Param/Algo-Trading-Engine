@@ -1971,4 +1971,6 @@ CMakeFiles/algo_engine.dir/engine/src/engine.cpp.o: \
   /Users/param/Documents/Engine/engine/src/../include/../../state/include/../../algos/include/TradeSignal.h \
   /Users/param/Documents/Engine/engine/src/../include/../../backtest/include/backtest_manager.h \
   /Users/param/Documents/Engine/engine/src/../include/../../backtest/include/../../algos/include/TradeSignal.h \
+  /Users/param/Documents/Engine/engine/src/../../algos/include/test_algo1.h \
+  /Users/param/Documents/Engine/engine/src/../../algos/include/base_algo.h \
   /Users/param/Documents/Engine/common/include/logger.h
