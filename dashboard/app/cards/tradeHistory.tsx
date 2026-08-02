@@ -72,7 +72,7 @@ export default function TradeHistory() {
         if (updated.length > 150) updated.pop();
         return updated;
       });
-    }, 10); // 10ms = 100 trades/sec
+    }, 1000); // 10ms = 100 trades/sec
 
     return () => clearInterval(interval);
   }, [isPaused]);
