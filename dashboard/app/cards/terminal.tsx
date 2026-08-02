@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useEngine } from "@/app/lib/engine-context";
+import { useDatafeed } from "@/app/lib/datafeed-context";
 
 type OrderType =
   | "Market Execution"
@@ -14,34 +14,29 @@ type OrderType =
 
 type FillPolicy = "Fill or Kill" | "Immediate or Cancel";
 
-export default function Terminal() {
-  const engine = useEngine();
+interface TerminalProps {
+  selectedSymbol: string;
+  onSymbolChange?: (symbol: string) => void; // optional, if you want to change from terminal
+}
+
+export default function Terminal({ selectedSymbol, onSymbolChange }: TerminalProps) {
+  const datafeed = useDatafeed();
 
   // --- Form State ---
-  const [symbol, setSymbol] = useState("BTC/USD");
   const [orderType, setOrderType] = useState<OrderType>("Market Execution");
-  const [quantityPercent, setQuantityPercent] = useState<number>(0.5); // percentage of capital
+  const [quantityPercent, setQuantityPercent] = useState<number>(0.5);
   const [manualQuantity, setManualQuantity] = useState<string>("");
   const [stopLoss, setStopLoss] = useState<string>("");
   const [takeProfit, setTakeProfit] = useState<string>("");
   const [fillPolicy, setFillPolicy] = useState<FillPolicy>("Immediate or Cancel");
 
-  // --- Price Simulation (dummy) ---
-  const [askPrice, setAskPrice] = useState<number>(65000.50);
-  const [bidPrice, setBidPrice] = useState<number>(65000.00);
-  const [capital] = useState<number>(10000); // dummy capital
+  // --- Real prices from the feed ---
+  const ticker = selectedSymbol ? datafeed.tickerData[selectedSymbol] : null;
+  const bidPrice = ticker?.bid ?? 0;
+  const askPrice = ticker?.ask ?? 0;
 
-  // Simulate price updates every 2 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const change = (Math.random() - 0.5) * 20; // +/- 10
-      const newAsk = Math.max(50000, askPrice + change);
-      const newBid = Math.max(50000, newAsk - 0.5);
-      setAskPrice(Math.round(newAsk * 100) / 100);
-      setBidPrice(Math.round(newBid * 100) / 100);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [askPrice]);
+  // --- Capital (mock, later from engine) ---
+  const capital = 10000;
 
   // --- Quantity calculation ---
   const getQuantity = (): number => {
@@ -59,8 +54,8 @@ export default function Terminal() {
       alert("Please enter a valid quantity.");
       return;
     }
-    console.log(`SELL ${qty} ${symbol} at market price ${bidPrice}`);
-    // Here you would later call an API to place the order
+    console.log(`SELL ${qty} ${selectedSymbol} at market price ${bidPrice}`);
+    // API call later
   };
 
   const handleBuy = () => {
@@ -69,63 +64,60 @@ export default function Terminal() {
       alert("Please enter a valid quantity.");
       return;
     }
-    console.log(`BUY ${qty} ${symbol} at market price ${askPrice}`);
-    // Here you would later call an API to place the order
+    console.log(`BUY ${qty} ${selectedSymbol} at market price ${askPrice}`);
+    // API call later
   };
 
   const handleCancel = () => {
     setManualQuantity("");
     setStopLoss("");
     setTakeProfit("");
-    // Reset other fields if needed
   };
 
-  // --- Available symbols (fallback if engine has none) ---
-  const symbols = Object.keys(engine.tickerData).length > 0
-    ? Object.keys(engine.tickerData)
-    : ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD"];
+  // --- Available symbols (from datafeed) ---
+  const symbols = Object.keys(datafeed.tickerData);
 
-  // Update symbol when engine tickerData changes
+  // --- Auto-select first symbol if none selected ---
   useEffect(() => {
-    if (Object.keys(engine.tickerData).length > 0 && !symbols.includes(symbol)) {
-      setSymbol(symbols[0]);
+    if (!selectedSymbol && symbols.length > 0 && onSymbolChange) {
+      onSymbolChange(symbols[0]);
     }
-  }, [engine.tickerData, symbols]);
+  }, [selectedSymbol, symbols, onSymbolChange]);
 
   return (
-    <div className="h-[100%] w-full p-3 flex flex-col gap-5 text-xs border border-gray-800 overflow-y-auto">
-      {/* Symbol */}
-	  <div className="flex justify-evenly">
-      <div className="flex items-center text-center gap-2 -none">
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="bg-red p-5 text-sm font-semibold flex-1"
-        >
-          {symbols.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </div>
+    <div className="h-full w-full p-5 flex flex-col gap-5 text-xs border border-gray-800 overflow-y-auto scrollbar-hide">
+      {/* Symbol + Order Type row */}
+      <div className="flex justify-between items-center gap-4">
+        {/* Symbol Selector */}
+        <div className="flex items-center gap-2 flex-1">
+          <select
+            value={selectedSymbol || ""}
+            onChange={(e) => onSymbolChange?.(e.target.value)}
+            className="appearance-none bg-[#181818] bg-none border border-gray-700 px-3 py-2 text-sm font-semibold flex-1"
+          >
+            {symbols.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
 
-      {/* Order Type */}
-      <div className="flex items-center gap-2">
-        <label className="text-gray-400 w-20">Order Type</label>
-        <select
-          value={orderType}
-          onChange={(e) => setOrderType(e.target.value as OrderType)}
-          className="border border-gray-700 px-2 py-1 flex-1"
-        >
-          <option value="Market Execution">Market Execution</option>
-          <option value="Buy Limit">Buy Limit</option>
-          <option value="Sell Limit">Sell Limit</option>
-          <option value="Buy Stop">Buy Stop</option>
-          <option value="Sell Stop">Sell Stop</option>
-          <option value="Buy Stop Limit">Buy Stop Limit</option>
-          <option value="Sell Stop Limit">Sell Stop Limit</option>
-        </select>
+        {/* Order Type */}
+        <div className="flex items-center gap-2 flex-1">
+          <select
+            value={orderType}
+            onChange={(e) => setOrderType(e.target.value as OrderType)}
+            className="appearance-none bg-[#181818] bg-none border border-gray-700 px-3 py-2 text-sm flex-1"
+          >
+            <option value="Market Execution">Market Execution</option>
+            <option value="Buy Limit">Buy Limit</option>
+            <option value="Sell Limit">Sell Limit</option>
+            <option value="Buy Stop">Buy Stop</option>
+            <option value="Sell Stop">Sell Stop</option>
+            <option value="Buy Stop Limit">Buy Stop Limit</option>
+            <option value="Sell Stop Limit">Sell Stop Limit</option>
+          </select>
+        </div>
       </div>
-	  </div>
 
       {/* Quantity */}
       <div>
@@ -136,23 +128,21 @@ export default function Terminal() {
             value={manualQuantity}
             onChange={(e) => setManualQuantity(e.target.value)}
             placeholder="Manual"
-            className=" border border-gray-700 px-2 py-1 w-24 text-right"
+            className="appearance-none bg-[#181818] bg-none border border-gray-700 px-3 py-2 w-full"
           />
-          <span className="text-gray-400 text-[10px]">or</span>
-          <span className="text-gray-400 text-[10px]">% of capital</span>
         </div>
-        <div className="flex gap-1 mt-3 ml-22">
+        <div className="flex gap-1 mt-2">
           {[0.25, 0.50, 0.75, 1.0, 1.25].map((pct) => (
             <button
               key={pct}
               onClick={() => {
                 setQuantityPercent(pct);
-                setManualQuantity(""); // clear manual when preset is used
+                setManualQuantity("");
               }}
-              className={`px-2 py-0.5 text-xs ${
+              className={`px-3 py-1 text-xs ${
                 quantityPercent === pct && !manualQuantity
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                  ? "bg-[#242424] text-white"
+                  : "bg-[#181818] text-gray-300 hover:bg-gray-700"
               }`}
             >
               {pct}%
@@ -162,25 +152,25 @@ export default function Terminal() {
       </div>
 
       {/* Stop Loss & Take Profit */}
-      <div className="gap-4">
-        <div className="flex">
-          <label className="text-gray-400 mb-0.5">Stop Loss</label>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="text-gray-400 block mb-0.5">Stop Loss</label>
           <input
             type="number"
             value={stopLoss}
             onChange={(e) => setStopLoss(e.target.value)}
             placeholder="e.g. 64000"
-            className="w-full bg-gray-800 border border-gray-700 px-2 py-1"
+            className="appearance-none bg-[#181818] bg-none border border-gray-700 px-3 py-2 w-full"
           />
         </div>
-        <div className="flex mt-4">
+        <div>
           <label className="text-gray-400 block mb-0.5">Take Profit</label>
           <input
             type="number"
             value={takeProfit}
             onChange={(e) => setTakeProfit(e.target.value)}
             placeholder="e.g. 66000"
-            className="w-full bg-gray-800 border border-gray-700 px-2 py-1"
+            className="appearance-none bg-[#181818] bg-none border border-gray-700 px-3 py-2 w-full"
           />
         </div>
       </div>
@@ -191,7 +181,7 @@ export default function Terminal() {
         <select
           value={fillPolicy}
           onChange={(e) => setFillPolicy(e.target.value as FillPolicy)}
-          className=" border border-gray-700 px-2 py-1 flex-1"
+          className="appearance-none bg-[#181818] bg-none border border-gray-700 px-3 py-2 flex-1"
         >
           <option value="Immediate or Cancel">Immediate or Cancel</option>
           <option value="Fill or Kill">Fill or Kill</option>
@@ -201,28 +191,32 @@ export default function Terminal() {
       {/* Price & Action Buttons */}
       <div className="grid grid-cols-2 gap-4 mt-2">
         {/* Sell Side */}
-        <div className="flex flex-col items-center bg-red-900/20 border border-red-800/50  p-2">
-          <div className="text-red-400 text-lg font-mono font-bold">
+        <div className="flex flex-col items-center p-3">
+          <div className="text-white text-xs">Sell by Market</div>
+          <div className="text-white text-lg font-mono font-bold">
             ${bidPrice.toFixed(2)}
           </div>
           <button
             onClick={handleSell}
-            className="mt-1 w-full text-white py-1.5  text-sm font-medium"
+            disabled={bidPrice === 0}
+            className="mt-1 w-full appearance-none bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white py-2 rounded text-sm font-medium"
           >
-            Sell by Market
+            Sell
           </button>
         </div>
 
         {/* Buy Side */}
-        <div className="flex flex-col items-center bg-green-900/20 border border-green-800/50  p-2">
-          <div className="text-green-400 text-lg font-mono font-bold">
+        <div className="flex flex-col items-center p-3">
+          <div className="text-white text-xs">Buy by Market</div>
+          <div className="text-white text-lg font-mono font-bold">
             ${askPrice.toFixed(2)}
           </div>
           <button
             onClick={handleBuy}
-            className="mt-1 w-full text-white py-1.5  text-sm font-medium"
+            disabled={askPrice === 0}
+            className="mt-1 w-full appearance-none bg-[#066bcc] disabled:bg-gray-600 text-white py-2 text-sm font-medium"
           >
-            Buy by Market
+            Buy
           </button>
         </div>
       </div>
@@ -230,7 +224,7 @@ export default function Terminal() {
       {/* Cancel Button */}
       <button
         onClick={handleCancel}
-        className="mt-1 w-full bg-gray-700 hover:bg-gray-600 text-gray-300 py-1.5  text-sm font-medium"
+        className="w-full appearance-none bg-gray-700 hover:bg-gray-600 text-gray-300 py-2 rounded text-sm font-medium"
       >
         Cancel
       </button>
