@@ -16,6 +16,8 @@ export default function Chart({ selectedSymbol, onSymbolChange }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
 
   const { tickerData, connected } = useDatafeed();
 
@@ -50,6 +52,28 @@ useEffect(() => {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setContainerSize({ width, height });
+        // If chart exists, update its size
+        if (chartRef.current) {
+          chartRef.current.applyOptions({ width, height });
+        }
+      }
+    });
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  // Create chart when container size is known
+  useEffect(() => {
+    if (!containerRef.current || containerSize.width === 0) return;
+    if (chartRef.current) {
+      chartRef.current.applyOptions(containerSize);
+      return;
+    }
 
     const chart = createChart(containerRef.current, {
       layout: {
@@ -60,8 +84,8 @@ useEffect(() => {
         vertLines: { color: "#1f2937" },
         horzLines: { color: "#1f2937" },
       },
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight || 400,
+      width: containerSize.width,
+      height: containerSize.height || 400,
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
@@ -79,19 +103,13 @@ useEffect(() => {
     chartRef.current = chart;
     seriesRef.current = series;
 
-    // Resize handler
-    const resize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight || 400 });
-      }
-    };
-    window.addEventListener("resize", resize);
-
     return () => {
-      window.removeEventListener("resize", resize);
-      chart.remove();
-    };
-  }, []);
+    chart.remove();
+    chartRef.current = null;
+    seriesRef.current = null;
+  };
+
+  }, [containerSize]);
 
   // --------------------------------------------
   // Data Update Loop

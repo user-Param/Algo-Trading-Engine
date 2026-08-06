@@ -1,8 +1,11 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 #include "../../algos/include/TradeSignal.h"
+
+namespace pqxx { class connection; }
 
 struct UserRecord {
     int id = 0;
@@ -51,4 +54,5 @@ public:
 private:
     bool connected_ = false;
     std::string conn_string_;
+    std::unique_ptr<pqxx::connection> conn_;
 };

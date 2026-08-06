@@ -13,9 +13,12 @@ using tcp = boost::asio::ip::tcp;
 
 // JSON parsing helpers
 static std::string json_str(const std::string& j, const std::string& k) {
-    auto p = j.find("\"" + k + "\":\"");
+    auto p = j.find("\"" + k + "\":");
     if (p == std::string::npos) return {};
-    p += k.size() + 4;
+    p += k.size() + 3;
+    while (p < j.size() && (j[p] == ' ' || j[p] == '\t')) p++;
+    if (p >= j.size() || j[p] != '"') return {};
+    p++;
     std::string v;
     while (p < j.size() && j[p] != '"') v += j[p++];
     return v;
@@ -42,6 +45,8 @@ FeedManager::~FeedManager()
 {
     LOG("FeedManager", "Destroying");
     disconnect_feed();
+    ioc_.stop();
+    if (io_thread_.joinable()) io_thread_.join();
 }
 
 void FeedManager::set_mode(bool backtest)
@@ -78,33 +83,32 @@ void FeedManager::restart_feed()
 }
 
 void FeedManager::connect_feed(const std::string&) {
-    // Prevent multiple concurrent connection attempts using atomic operations
-    bool expected = false;
-    if (!connecting_.compare_exchange_strong(expected, true)) {
-        // Already connecting or connected
-        if (connected_.load()) {
-            LOG("FeedManager", "connect_feed skipped - already connected");
-            return;
-        }
-        if (connecting_.load()) {
-            LOG("FeedManager", "connect_feed skipped - already connecting");
-            return;
-        }
-        // Should not reach here due to compare_exchange_strong, but just in case
+    std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+
+    if (connected_.load()) {
+        LOG("FeedManager", "connect_feed skipped - already connected");
         return;
     }
+    if (connecting_.load()) {
+        LOG("FeedManager", "connect_feed skipped - already connecting");
+        return;
+    }
+    connecting_.store(true);
 
+    uint64_t my_session = ++session_;
     LOG("FeedManager", "connect_feed: resolving ...");
 
     ws_ = std::make_unique<websocket::stream<beast::tcp_stream>>(
         net::make_strand(ioc_));
     resolver_ = std::make_unique<tcp::resolver>(net::make_strand(ioc_));
 
-    std::string host = "16.192.155.232";
-    std::string port = "80";
+    std::string host = "localhost";
+    std::string port = "8765";
 
     resolver_->async_resolve(host, port,
-        [this, host, port](beast::error_code ec, tcp::resolver::results_type results) {
+        [this, host, port, my_session](beast::error_code ec, tcp::resolver::results_type results) {
+            std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+            if (my_session != session_.load()) return;
             if (ec) {
                 ERR("FeedManager", "resolve failed: " << ec.message());
                 connecting_.store(false);
@@ -116,7 +120,9 @@ void FeedManager::connect_feed(const std::string&) {
             beast::get_lowest_layer(*ws_).expires_after(std::chrono::seconds(60)); // Increased timeout as per requirements
 
             beast::get_lowest_layer(*ws_).async_connect(results,
-                [this, host, port](beast::error_code ec, tcp::resolver::results_type::endpoint_type) {
+                [this, host, port, my_session](beast::error_code ec, tcp::resolver::results_type::endpoint_type) {
+                    std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+                    if (my_session != session_.load()) return;
                     if (ec) {
                         ERR("FeedManager", "connect failed: " << ec.message());
                         connecting_.store(false);
@@ -135,7 +141,9 @@ void FeedManager::connect_feed(const std::string&) {
                         }));
 
                     ws_->async_handshake(host + ":" + port, "/",
-                        [this, host, port](beast::error_code ec) {
+                        [this, host, port, my_session](beast::error_code ec) {
+                            std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+                            if (my_session != session_.load()) return;
                             if (ec) {
                                 ERR("FeedManager", "WS handshake failed: " << ec.message());
                                 connecting_.store(false);
@@ -146,7 +154,9 @@ void FeedManager::connect_feed(const std::string&) {
                             LOG("FeedManager", "WS handshake OK, sending _Live ...");
 
                             ws_->async_write(net::buffer(std::string("_Live")),
-                                [this](beast::error_code ec, std::size_t) {
+                                [this, my_session](beast::error_code ec, std::size_t) {
+                                    std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+                                    if (my_session != session_.load()) return;
                                     if (ec) {
                                         ERR("FeedManager", "write _Live failed: " << ec.message());
                                         connecting_.store(false);
@@ -157,7 +167,9 @@ void FeedManager::connect_feed(const std::string&) {
                                     LOG("FeedManager", "Sent _Live, subscribing ...");
 
                                     ws_->async_write(net::buffer(std::string(R"({"subscribe":"ticker_"})")),
-                                        [this](beast::error_code ec, std::size_t) {
+                                        [this, my_session](beast::error_code ec, std::size_t) {
+                                            std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+                                            if (my_session != session_.load()) return;
                                             if (ec) {
                                                 ERR("FeedManager", "write subscribe failed: " << ec.message());
                                                 connecting_.store(false);
@@ -168,22 +180,34 @@ void FeedManager::connect_feed(const std::string&) {
                                             connecting_.store(false);
                                             connected_.store(true);
                                             LOG("FeedManager", "Subscribed to ticker_");
-                                            do_read();
+                                            do_read(my_session);
                                         });
                                 });
                         });
                 });
         });
 
-    io_thread_ = std::thread([this]() {
-        LOG("FeedManager", "IO thread started");
-        ioc_.run();
-        LOG("FeedManager", "IO thread exited");
-    });
+    if (!io_thread_.joinable()) {
+        io_thread_ = std::thread([this]() {
+            LOG("FeedManager", "IO thread started");
+            while (!ioc_.stopped()) {
+                try {
+                    ioc_.run();
+                    break;
+                } catch (const std::exception& e) {
+                    ERR("FeedManager", "IO thread exception: " << e.what());
+                } catch (...) {
+                    ERR("FeedManager", "IO thread exception");
+                }
+            }
+            LOG("FeedManager", "IO thread exited");
+        });
+    }
 }
 
 void FeedManager::schedule_reconnect()
 {
+    std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
     if (!reconnect_enabled_) {
         LOG("FeedManager", "reconnect disabled, not scheduling");
         return;
@@ -196,6 +220,11 @@ void FeedManager::schedule_reconnect()
             ERR("FeedManager", "reconnect timer error: " << ec.message());
             return;
         }
+        std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+        if (!reconnect_enabled_.load()) {
+            LOG("FeedManager", "reconnect cancelled");
+            return;
+        }
         LOG("FeedManager", "reconnect timer fired, attempting reconnect");
         connect_feed("");
     });
@@ -204,10 +233,13 @@ void FeedManager::schedule_reconnect()
 void FeedManager::disconnect_feed()
 {
     LOG("FeedManager", "disconnect_feed called");
+    std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+    ++session_;
     connected_.store(false);
     connecting_.store(false);
     if (reconnect_timer_) {
         reconnect_timer_->cancel();
+        reconnect_timer_.reset();
     }
     if (ws_) {
         beast::error_code ec;
@@ -215,11 +247,6 @@ void FeedManager::disconnect_feed()
     }
     ws_.reset();
     resolver_.reset();
-    if (io_thread_.joinable()) {
-        ioc_.stop();
-        io_thread_.join();
-        ioc_.restart();
-    }
     LOG("FeedManager", "disconnect_feed done");
 }
 
@@ -241,15 +268,19 @@ void FeedManager::register_observer(MarketDataCallback cb)
     observers_.push_back(std::move(cb));
 }
 
-void FeedManager::do_read()
+void FeedManager::do_read(uint64_t session)
 {
     buffer_.consume(buffer_.size());
     ws_->async_read(buffer_,
-                    beast::bind_front_handler(&FeedManager::on_read, this));
+                    [this, session](beast::error_code ec, std::size_t n) {
+                        on_read(ec, n, session);
+                    });
 }
 
-void FeedManager::on_read(beast::error_code ec, std::size_t)
+void FeedManager::on_read(beast::error_code ec, std::size_t, uint64_t session)
 {
+    std::lock_guard<std::recursive_mutex> lock(connect_mutex_);
+    if (session != session_.load()) return;
     if (ec == websocket::error::closed)
     {
         LOG("FeedManager", "Connection closed by server");
@@ -267,7 +298,7 @@ void FeedManager::on_read(beast::error_code ec, std::size_t)
 
     std::string msg = beast::buffers_to_string(buffer_.data());
     handle_message(msg);
-    do_read();
+    do_read(session);
 }
 
 void FeedManager::handle_message(const std::string &msg)

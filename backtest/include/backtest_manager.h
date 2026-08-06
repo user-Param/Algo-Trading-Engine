@@ -1,8 +1,13 @@
 #pragma once
 
-#include <string>
+#include <atomic>
 #include <cstdint>
+#include <functional>
+#include <string>
+#include <thread>
+#include <vector>
 #include "../../algos/include/TradeSignal.h"
+#include "../../feed/include/feed_manager.h"
 
 struct BacktestingResult {
     std::string symbol;
@@ -34,7 +39,23 @@ public:
 
     BacktestingResult get_results() const;
 
+    void set_market_data_handler(std::function<void(const MarketData&)> handler);
+
+    double get_progress() const;
+
 private:
-    bool backtesting_ = false;
+    std::vector<MarketData> load_historical_data(const std::string& symbol) const;
+    std::vector<MarketData> generate_synthetic_data(const std::string& symbol, size_t count) const;
+    void finalize_results();
+
+    std::atomic<bool> backtesting_{false};
+    std::atomic<bool> stop_requested_{false};
+    std::thread replay_thread_;
+    std::function<void(const MarketData&)> handler_;
     BacktestingResult results_;
+    mutable std::vector<MarketData> history_;
+    std::atomic<size_t> replay_index_{0};
+    size_t total_ticks_ = 0;
+    int replay_delay_ms_ = 50;
+    double progress_ = 0.0;
 };

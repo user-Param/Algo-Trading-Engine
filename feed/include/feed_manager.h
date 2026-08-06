@@ -51,8 +51,8 @@ public:
 
 private:
     void schedule_reconnect();
-    void do_read();
-    void on_read(boost::beast::error_code ec, std::size_t bytes);
+    void do_read(uint64_t session);
+    void on_read(boost::beast::error_code ec, std::size_t bytes, uint64_t session);
     void handle_message(const std::string& msg);
 
     bool backtest_mode_ = false;
@@ -63,7 +63,8 @@ private:
     boost::asio::io_context ioc_;
     std::unique_ptr<boost::beast::websocket::stream<boost::beast::tcp_stream>> ws_;
     std::unique_ptr<boost::asio::ip::tcp::resolver> resolver_;
-    std::mutex connect_mutex_;
+    std::recursive_mutex connect_mutex_;
+    std::atomic<uint64_t> session_{0};
 
     std::unordered_map<std::string, MarketData> latest_data_;
     std::function<void(const MarketData&)> callback_;

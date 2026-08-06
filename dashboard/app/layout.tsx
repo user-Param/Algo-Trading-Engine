@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Algo Trading Engine",
+  title: "Protype",
   description: "Highly Optimised Algo Trading Engine",
 };
 

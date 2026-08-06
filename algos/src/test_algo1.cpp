@@ -38,6 +38,10 @@ void TestAlgo1::stop() {
     std::cout << "TestAlgo1 [" << id_ << "]: Stopped" << std::endl;
 }
 
+bool TestAlgo1::isRunning() const {
+    return running_;
+}
+
 static int test_algo_counter = 0;
 
 std::unique_ptr<BaseAlgo> createTestAlgo1() {

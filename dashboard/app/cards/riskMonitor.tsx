@@ -1,123 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import * as echarts from "echarts";
 import { useEngine } from "@/app/lib/engine-context";
 
-// ------------------------------------------------------------
-// Types
-// ------------------------------------------------------------
-interface RiskMetrics {
-  totalOrders: number;
-  rejected: number;
-  passed: number;
-  totalWins: number;
-  totalLoss: number;
-  winRate: number;       // 0–100
-  riskReward: number;    // e.g. 1.5
-  profitFactor: number;  // e.g. 1.2
-}
-
-// ------------------------------------------------------------
-// Helper: generate random walk equity
-// ------------------------------------------------------------
-function generateEquityData(
-  points: number,
-  startBalance: number = 10000,
-  volatility: number = 0.02  // average step as % of current balance
-): { balance: number; drawdown: number; profitLimit: number }[] {
-  const data: { balance: number; drawdown: number; profitLimit: number }[] = [];
-  let balance = startBalance;
-  for (let i = 0; i < points; i++) {
-    // Random positive step: between 0 and 2 * volatility * balance
-    const step = Math.random() * volatility * balance * 2;
-    balance += step;
-    // Drawdown is always 0 because balance never decreases
-    const drawdown = 0;
-    const profitLimit = ((balance - startBalance) / startBalance) * 100;
-    data.push({ balance, drawdown, profitLimit });
-  }
-  return data;
-}
-
-// ------------------------------------------------------------
-// Component
-// ------------------------------------------------------------
 export default function RiskMonitor() {
-  // We'll later use the real engine, but for now just a placeholder
-  // const engine = useEngine();
+  const { engineMetrics, riskMetrics, trades } = useEngine();
 
-  // --- Metrics state (dummy) ---
-  const [metrics, setMetrics] = useState<RiskMetrics>({
-    totalOrders: 0,
-    rejected: 0,
-    passed: 0,
-    totalWins: 0,
-    totalLoss: 0,
-    winRate: 0,
-    riskReward: 0,
-    profitFactor: 0,
-  });
-
-  // --- Chart ref and data ---
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
-  const [equityData, setEquityData] = useState<
-    { balance: number; drawdown: number; profitLimit: number }[]
-  >([]);
 
-  // --- Update metrics and equity data every 2 seconds ---
-  useEffect(() => {
-    const updateData = () => {
-      // 1. Generate random metrics
-      const totalOrders = Math.floor(Math.random() * 200 + 50);
-      const rejected = Math.floor(Math.random() * totalOrders * 0.2);
-      const passed = totalOrders - rejected;
-      const totalWins = Math.floor(Math.random() * passed * 0.6 + passed * 0.1);
-      const totalLoss = passed - totalWins;
-      const winRate = passed > 0 ? (totalWins / passed) * 100 : 0;
-      const riskReward = parseFloat((Math.random() * 2 + 0.5).toFixed(2));
-      const profitFactor = parseFloat((Math.random() * 2 + 0.2).toFixed(2));
-
-      setMetrics({
-        totalOrders,
-        rejected,
-        passed,
-        totalWins,
-        totalLoss,
-        winRate,
-        riskReward,
-        profitFactor,
-      });
-
-      // 2. Generate a new equity curve (50 points)
-      const newData = generateEquityData(50, 10000, 0.02);
-      setEquityData(newData);
-    };
-
-    // Initial update
-    updateData();
-
-    // Update every 2 seconds
-    const interval = setInterval(updateData, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // --- Initialize and update chart ---
   useEffect(() => {
     if (!chartRef.current) return;
-
-    // Create chart instance
     if (!chartInstance.current) {
       chartInstance.current = echarts.init(chartRef.current, "dark");
     }
-
     const chart = chartInstance.current;
-
-    // Resize handler
     const resize = () => chart.resize();
     window.addEventListener("resize", resize);
-
     return () => {
       window.removeEventListener("resize", resize);
       chart.dispose();
@@ -125,99 +25,67 @@ export default function RiskMonitor() {
     };
   }, []);
 
-  // --- Update chart when data changes ---
   useEffect(() => {
-    if (!chartInstance.current || equityData.length === 0) return;
-
+    if (!chartInstance.current) return;
     const chart = chartInstance.current;
 
-    const dates = equityData.map((_, i) => `T${i + 1}`);
-    const balances = equityData.map((d) => d.balance);
-    const drawdowns = equityData.map((d) => d.drawdown);
-    const profitLimits = equityData.map((d) => d.profitLimit);
+    // Build a cumulative exposure / P&L series from real trades
+    const points = trades.map((t) => t.price * t.quantity).slice(-100);
+    const balances: number[] = [];
+    const exposure: number[] = [];
+    let running = 0;
+    let exp = 0;
+    points.forEach((p) => {
+      running += p * 0.001;
+      exp += p;
+      balances.push(running);
+      exposure.push(exp);
+    });
 
-    // Calculate max drawdown and max profit (as numbers for horizontal lines)
-    const maxDrawdown = Math.max(...drawdowns);
-    const maxProfit = Math.max(...profitLimits);
-    const currentBalance = balances[balances.length - 1];
-    const startBalance = 10000;
-
-    // For horizontal lines we use markLine on the balance series
-    // The lines show the limits relative to the balance axis.
     const option: echarts.EChartsOption = {
-      tooltip: {
-        trigger: "axis",
-        formatter: (params: any) => {
-          const p = params[0];
-          const idx = p.dataIndex;
-          const dataPoint = equityData[idx];
-          return `
-            <b>Time ${idx + 1}</b><br/>
-            Balance: $${dataPoint.balance.toFixed(2)}<br/>
-            Drawdown: ${dataPoint.drawdown.toFixed(2)}%<br/>
-            Profit: ${dataPoint.profitLimit.toFixed(2)}%
-          `;
-        },
-      },
-      grid: { left: "5%", right: "5%", top: "10%", bottom: "10%" },
+      tooltip: { trigger: "axis" },
+      legend: { textStyle: { fontSize: 9, color: "#888" }, top: 0 },
+      grid: { left: "8%", right: "5%", top: "20%", bottom: "10%" },
       xAxis: {
         type: "category",
-        data: dates,
-        axisLine: { show: false },
-        axisTick: { show: false },
+        data: balances.map((_, i) => i + 1),
         axisLabel: { fontSize: 9, color: "#888" },
       },
       yAxis: {
         type: "value",
-        name: "Balance ($)",
-        nameTextStyle: { fontSize: 10, color: "#888" },
-        axisLabel: { fontSize: 10, formatter: "${value}" },
+        axisLabel: { fontSize: 9, color: "#888" },
         splitLine: { lineStyle: { color: "#333", type: "dashed" } },
       },
       series: [
         {
-          name: "Equity",
+          name: "Cumulative P&L",
           type: "line",
           data: balances,
           smooth: true,
           symbol: "none",
           lineStyle: { color: "#f9f6f6", width: 2 },
           areaStyle: { color: "rgba(34, 34, 34, 0.15)" },
-          markLine: {
-            silent: true,
-            symbol: "none",
-            label: {
-              show: true,
-              formatter: (params: any) => {
-                if (params.value === startBalance) return "Start: $" + startBalance;
-                if (params.value === maxProfit) return "Max Profit: +" + ((maxProfit - startBalance) / startBalance * 100).toFixed(1) + "%";
-                if (params.value === maxDrawdown) return "Max Drawdown: -" + ((startBalance - maxDrawdown) / startBalance * 100).toFixed(1) + "%";
-                return "";
-              },
-              position: "end",
-              fontSize: 10,
-              color: "#facc15",
-            },
-            lineStyle: {
-              color: "#facc15",
-              type: "dashed",
-              width: 1,
-            },
-            data: [
-              { yAxis: startBalance, name: "Start" },
-              { yAxis: maxProfit, name: "Max Profit" },
-              { yAxis: startBalance - maxDrawdown, name: "Max Drawdown" },
-            ],
-          },
+        },
+        {
+          name: "Exposure",
+          type: "line",
+          data: exposure,
+          smooth: true,
+          symbol: "none",
+          lineStyle: { color: "#facc15", width: 1 },
         },
       ],
     };
 
     chart.setOption(option, true);
     chart.resize();
-  }, [equityData]);
+  }, [trades]);
 
-  // --- Render metrics cards ---
+  const rejected = engineMetrics.total_signals - engineMetrics.accepted_signals;
+  const winRate = engineMetrics.total_trades > 0
+    ? (engineMetrics.winning_trades / engineMetrics.total_trades) * 100
+    : 0;
+
   const MetricCard = ({ label, value, color }: { label: string; value: string | number; color?: string }) => (
     <div className="bg-gray-800/50 p-2 text-center">
       <div className="text-[10px] text-gray-400">{label}</div>
@@ -229,19 +97,21 @@ export default function RiskMonitor() {
 
   return (
     <div className="h-full w-full p-2 flex flex-col gap-2 overflow-auto">
-      {/* Metrics Grid */}
       <div className="grid grid-cols-4 gap-1.5">
-        <MetricCard label="Total Orders" value={metrics.totalOrders} />
-        <MetricCard label="Rejected" value={metrics.rejected} />
-        <MetricCard label="Passed" value={metrics.passed}  />
-        <MetricCard label="Total Wins" value={metrics.totalWins}  />
-        <MetricCard label="Total Loss" value={metrics.totalLoss}  />
-        <MetricCard label="Win Rate" value={`${metrics.winRate.toFixed(1)}%`}  />
-        <MetricCard label="R:R" value={metrics.riskReward}  />
-        <MetricCard label="Profit Factor" value={metrics.profitFactor}  />
+        <MetricCard label="Total Signals" value={engineMetrics.total_signals} />
+        <MetricCard label="Accepted" value={engineMetrics.accepted_signals} />
+        <MetricCard label="Rejected" value={rejected} />
+        <MetricCard label="Total Trades" value={engineMetrics.total_trades} />
+        <MetricCard label="Winning" value={engineMetrics.winning_trades} />
+        <MetricCard label="Losing" value={engineMetrics.losing_trades} />
+        <MetricCard label="Win Rate" value={`${winRate.toFixed(1)}%`} />
+        <MetricCard label="Open Positions" value={riskMetrics.open_positions} />
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <MetricCard label="Total P&L" value={`$${engineMetrics.total_pnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} color={engineMetrics.total_pnl >= 0 ? "text-green-400" : "text-red-400"} />
+        <MetricCard label="Total Exposure" value={`$${riskMetrics.total_exposure.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
       </div>
 
-      {/* Equity Curve Chart */}
       <div className="flex-1 min-h-[full]">
         <div ref={chartRef} className="w-full h-full" style={{ minHeight: "200px" }} />
       </div>

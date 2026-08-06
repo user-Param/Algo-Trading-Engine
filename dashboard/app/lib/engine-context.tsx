@@ -26,12 +26,12 @@ export interface PerformanceData {
 export interface ThroughputData {
   messages_per_sec: number;
   packets_per_sec: number;
-  signals_per_sec: number;  // Changed from signal_per_sec
+  signals_per_sec: number;
   bytes_per_sec: number;
   broadcasts_per_sec: number;
   subscriptions_per_sec: number;
-  ticks_per_sec: number;    // Added for market data
-  trades_per_sec: number;   // Added for trade execution
+  ticks_per_sec: number;
+  trades_per_sec: number;
   cumulative: {
     total_messages: number;
     total_signals: number;
@@ -40,7 +40,7 @@ export interface ThroughputData {
     total_bytes: number;
     total_broadcasts: number;
     total_subscriptions: number;
-    total_ticks: number;     // Added
+    total_ticks: number;
   };
   database_reads_per_sec: number;
   database_writes_per_sec: number;
@@ -48,9 +48,10 @@ export interface ThroughputData {
 
 export interface HealthData {
   db: string;
-  algo_instances: number;   // Changed from feed_instances
+  algo_instances: number;
   status: string;
-  engine_uptime: number;    // Added
+  engine_uptime: number;
+  feed?: boolean;
 }
 
 export interface EngineHealthData {
@@ -73,7 +74,7 @@ export interface ConfigData {
   deployment_id: string;
   schema_version: number;
   runtime?: Record<string, string>;
-  engine_mode: "live" | "backtest";  // Added
+  engine_mode: "live" | "backtest";
 }
 
 export interface AnalyticsData {
@@ -88,8 +89,8 @@ export interface AnalyticsData {
   most_active_algo: string;
   engine_uptime_seconds: number;
   health_score: number;
-  total_algorithms: number;      // Added
-  active_algorithms: number;     // Added
+  total_algorithms: number;
+  active_algorithms: number;
   database_performance: {
     insert_latency_ms: number;
     query_latency_ms: number;
@@ -128,7 +129,7 @@ export interface AlertItem {
   message: string;
   severity: "info" | "warning" | "critical";
   timestamp?: string;
-  source?: string;  // Added for algorithm/engine source
+  source?: string;
 }
 
 export interface AuditEvent {
@@ -154,7 +155,7 @@ export interface AlgoInstance {
 
 export interface TradeData {
   id: number;
-  algo_id: number;
+  algoId: string;
   symbol: string;
   side: "buy" | "sell";
   price: number;
@@ -190,9 +191,19 @@ export interface EngineMetrics {
 export interface BacktestStatus {
   is_running: boolean;
   current_symbol: string;
-  progress: number;  // 0-100
+  progress: number; // 0-100
   start_capital: number;
   current_capital: number;
+}
+
+export interface PositionData {
+  id: string;
+  symbol: string;
+  quantity: number;
+  avg_price: number;
+  current_price: number;
+  pnl: number;
+  unrealized_pnl_pct: number;
 }
 
 // --- Main Engine State Interface ---
@@ -210,16 +221,20 @@ interface EngineState {
   audit: AuditEvent[];
   algorithms: AlgoInstance[];
   trades: TradeData[];
+  positions: PositionData[];
   riskMetrics: RiskMetrics;
   engineMetrics: EngineMetrics;
   backtestStatus: BacktestStatus;
   tickerData: Record<string, { symbol: string; price: number; bid: number; ask: number; timestamp: number }>;
-  connected: boolean;
+  connected: boolean; // REST reachability
+  wsConnected: boolean; // WebSocket reachability
   lastUpdate: number;
 }
 
 interface EngineContextValue extends EngineState {
   refresh: () => void;
+  connectFeed: () => Promise<boolean>;
+  registerUser: (username: string) => Promise<boolean>;
   startEngine: () => Promise<boolean>;
   stopEngine: () => Promise<boolean>;
   startBacktest: (symbol: string, capital: number) => Promise<boolean>;
@@ -227,6 +242,8 @@ interface EngineContextValue extends EngineState {
   registerAlgo: (algo: { name: string; type: string }) => Promise<boolean>;
   startAlgo: (algoId: string) => Promise<boolean>;
   stopAlgo: (algoId: string) => Promise<boolean>;
+  /** Subscribes to a market-data symbol over the WS feed (backend text protocol: "subscribe <symbol>") */
+  subscribeSymbol: (symbol: string) => void;
 }
 
 // --- Default State ---
@@ -329,6 +346,7 @@ const defaultState: EngineState = {
   audit: [],
   algorithms: [],
   trades: [],
+  positions: [],
   riskMetrics: {
     max_quantity: 100000,
     max_leverage: 100,
@@ -358,6 +376,7 @@ const defaultState: EngineState = {
   },
   tickerData: {},
   connected: false,
+  wsConnected: false,
   lastUpdate: 0,
 };
 
@@ -373,6 +392,9 @@ const EngineContext = createContext<EngineContextValue>({
   registerAlgo: async () => false,
   startAlgo: async () => false,
   stopAlgo: async () => false,
+  connectFeed: async () => false,
+  registerUser: async () => false,
+  subscribeSymbol: () => {},
 });
 
 export function useEngine() {
@@ -383,12 +405,11 @@ export function useEngine() {
 
 async function fetchJSON<T = unknown>(url: string, label: string): Promise<T | null> {
   try {
-    console.log(`[Engine] REST fetch: ${label} -> ${url}`);
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) {
-      console.error(`[Engine] REST fetch failed: ${label} -> ${url}`);
+      console.error(`[Engine] REST fetch failed (${res.status}): ${label} -> ${url}`);
       return null;
-    }
+    };
     return (await res.json()) as T;
   } catch (error) {
     console.error(`[Engine] REST fetch error: ${label} -> ${url}`, error);
@@ -405,18 +426,28 @@ async function postJSON<T = unknown>(url: string, data?: any): Promise<T | null>
     });
     if (!res.ok) return null;
     return (await res.json()) as T;
-  } catch {
+  } catch (error) {
+    console.error(`[Engine] REST post error -> ${url}`, error);
     return null;
   }
 }
 
 // --- Provider Component ---
+//
+// Architecture note: the backend's /engine WebSocket is request/response
+// only (plain text in, plain text out) — it does NOT push topic updates on
+// its own. There is no server-side broadcast loop. So this provider treats
+// REST polling as the single source of truth for all dashboard data (a
+// CRUD/polling pattern), and only uses the WebSocket for the two things the
+// backend actually supports there: a lightweight "status" ping/connectivity
+// check and "subscribe <symbol>" for market-data feed symbols.
 
 export function EngineProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<EngineState>(defaultState);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
 
   const update = useCallback((partial: Partial<EngineState>) => {
     setState((prev) => {
@@ -431,12 +462,12 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // --- REST API Methods ---
+  // --- REST API Methods (CRUD actions against the backend) ---
 
   const startEngine = useCallback(async (): Promise<boolean> => {
     const result = await postJSON(`${BASE_URL}/api/engine/start`);
     if (result) {
-      await fetchAll();
+      await fetchAllRef.current();
       return true;
     }
     return false;
@@ -445,7 +476,7 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   const stopEngine = useCallback(async (): Promise<boolean> => {
     const result = await postJSON(`${BASE_URL}/api/engine/stop`);
     if (result) {
-      await fetchAll();
+      await fetchAllRef.current();
       return true;
     }
     return false;
@@ -454,7 +485,7 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   const startBacktest = useCallback(async (symbol: string, capital: number): Promise<boolean> => {
     const result = await postJSON(`${BASE_URL}/api/backtest/start`, { symbol, capital });
     if (result) {
-      await fetchAll();
+      await fetchAllRef.current();
       return true;
     }
     return false;
@@ -463,23 +494,47 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   const stopBacktest = useCallback(async (): Promise<boolean> => {
     const result = await postJSON(`${BASE_URL}/api/backtest/stop`);
     if (result) {
-      await fetchAll();
+      await fetchAllRef.current();
       return true;
     }
     return false;
   }, []);
 
-  const registerAlgo = useCallback(async (algo: { name: string; type: string }): Promise<boolean> => {
-    // This would require a new API endpoint to register algorithms
-    // For now, we'll just log it
-    console.log("[Engine] Register algorithm:", algo);
-    return true;
+  const registerAlgo = useCallback(async (algo: { name: string; type: string; userId?: number }): Promise<boolean> => {
+    const result = await postJSON(`${BASE_URL}/api/algos/register`, {
+      name: algo.name,
+      type: algo.type,
+      userId: algo.userId || 1,
+    });
+    if (result) {
+      await fetchAllRef.current();
+      return true;
+    }
+    return false;
+  }, []);
+
+  const connectFeed = useCallback(async (): Promise<boolean> => {
+    const result = await postJSON(`${BASE_URL}/api/feeds/connect`);
+    if (result) {
+      await fetchAllRef.current();
+      return true;
+    }
+    return false;
+  }, []);
+
+  const registerUser = useCallback(async (username: string): Promise<boolean> => {
+    const result = await postJSON(`${BASE_URL}/api/users/register`, { username });
+    if (result) {
+      await fetchAllRef.current();
+      return true;
+    }
+    return false;
   }, []);
 
   const startAlgo = useCallback(async (algoId: string): Promise<boolean> => {
     const result = await postJSON(`${BASE_URL}/api/algos/start`, { algoId });
     if (result) {
-      await fetchAll();
+      await fetchAllRef.current();
       return true;
     }
     return false;
@@ -488,198 +543,184 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   const stopAlgo = useCallback(async (algoId: string): Promise<boolean> => {
     const result = await postJSON(`${BASE_URL}/api/algos/stop`, { algoId });
     if (result) {
-      await fetchAll();
+      await fetchAllRef.current();
       return true;
     }
     return false;
   }, []);
 
-  // --- Data Fetching ---
+  // --- Data Fetching (single source of truth) ---
 
   const fetchAll = useCallback(async () => {
-    console.log("[Engine] Starting full REST poll...");
-
     const [
       status,
-      algos,
+      algosRaw,
       backtestStatus,
       engineMetrics,
       riskMetrics,
+      health,
+      tradesRaw,
+      positionsRaw,
     ] = await Promise.all([
-      fetchJSON<{ running: boolean }>(`${BASE_URL}/api/engine/status`, "status"),
-      fetchJSON<AlgoInstance[]>(`${BASE_URL}/api/algos/list`, "algos"),
-      fetchJSON<BacktestStatus>(`${BASE_URL}/api/backtest/status`, "backtest"),
-      fetchJSON<EngineMetrics>(`${BASE_URL}/api/engine/metrics`, "metrics"),
-      fetchJSON<RiskMetrics>(`${BASE_URL}/api/risk/metrics`, "risk"),
+      fetchJSON<{ status?: string; running: boolean }>(`${BASE_URL}/api/engine/status`, "status"),
+      fetchJSON<{ status?: string; algos: AlgoInstance[] }>(`${BASE_URL}/api/algos/list`, "algos"),
+      fetchJSON<{ status?: string; running: boolean; symbol: string; progress: number; start_capital: number; current_capital: number }>(`${BASE_URL}/api/backtest/status`, "backtest"),
+      fetchJSON<{ status?: string } & EngineMetrics>(`${BASE_URL}/api/engine/metrics`, "metrics"),
+      fetchJSON<{ status?: string } & RiskMetrics>(`${BASE_URL}/api/risk/metrics`, "risk"),
+      fetchJSON<{ status?: string; engine: boolean; feed: boolean; database: boolean }>(`${BASE_URL}/api/health`, "health"),
+      fetchJSON<{ status?: string; trades: TradeData[] }>(`${BASE_URL}/api/trades?limit=50`, "trades"),
+      fetchJSON<{ status?: string; positions: PositionData[] }>(`${BASE_URL}/api/positions`, "positions"),
     ]);
 
-    // Update state with fetched data
+    if (!mountedRef.current) return;
+
+    const algos = algosRaw?.algos || [];
+    const trades = tradesRaw?.trades || [];
+    // A REST call succeeding at all (even a single one) means the backend is reachable.
+    const anyRestOk = [status, algosRaw, backtestStatus, engineMetrics, riskMetrics, health].some(
+      (v) => v !== null
+    );
+
     update({
       health: {
-        ...state.health,
+        db: health?.database ? "connected" : "disconnected",
+        algo_instances: algos.length,
         status: status?.running ? "running" : "stopped",
-        algo_instances: algos?.length || 0,
+        engine_uptime: 0,
+        feed: health?.feed,
       },
-      algorithms: algos || [],
-      backtestStatus: backtestStatus || defaultState.backtestStatus,
-      engineMetrics: engineMetrics || defaultState.engineMetrics,
-      riskMetrics: riskMetrics || defaultState.riskMetrics,
-      connected: true,
+      algorithms: algos,
+      trades,
+      positions: positionsRaw?.positions || [],
+      backtestStatus: backtestStatus
+        ? {
+            is_running: backtestStatus.running,
+            current_symbol: backtestStatus.symbol || "",
+            progress: backtestStatus.progress || 0,
+            start_capital: backtestStatus.start_capital || 0,
+            current_capital: backtestStatus.current_capital || 0,
+          }
+        : defaultState.backtestStatus,
+      engineMetrics: engineMetrics ? (engineMetrics as EngineMetrics) : defaultState.engineMetrics,
+      riskMetrics: riskMetrics ? (riskMetrics as RiskMetrics) : defaultState.riskMetrics,
+      connected: anyRestOk,
     });
+  }, [update]);
 
-    console.log("[Engine] REST poll completed.");
-  }, [update, state.health]);
-
-  const refresh = useCallback(() => {
-    fetchAll();
+  // Keep a stable ref to the latest fetchAll so action methods (start/stop/etc,
+  // defined above with empty dep arrays) can always call the current version
+  // without needing to be redeclared or included in the WS effect's deps.
+  const fetchAllRef = useRef(fetchAll);
+  useEffect(() => {
+    fetchAllRef.current = fetchAll;
   }, [fetchAll]);
 
-  // --- WebSocket Setup ---
+  const refresh = useCallback(() => {
+    fetchAllRef.current();
+  }, []);
+
+  // --- WebSocket: connectivity ping + symbol subscription only ---
+  // The backend's WS handler speaks plain text, not JSON:
+  //   send "status"            -> replies "running" | "stopped"
+  //   send "subscribe <sym>"   -> replies "subscribed to <sym>"
+  //   send "start" / "stop"    -> controls the engine
+  //   anything else            -> replies "unknown command"
+  // There is no server-initiated push, so we don't treat this socket as a
+  // data stream — REST polling (fetchAll) owns all dashboard state.
+
+  const subscribeSymbol = useCallback((symbol: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(`subscribe ${symbol}`);
+    } else {
+      console.warn("[Engine] Cannot subscribe, WebSocket not open");
+    }
+  }, []);
 
   useEffect(() => {
-    console.log("[Engine] Provider mounted, initializing...");
+    mountedRef.current = true;
 
-    fetchAll();
-    pollTimer.current = setInterval(fetchAll, 2000);
+    // Kick off REST polling immediately; this is the real data source.
+    fetchAllRef.current();
+    pollTimer.current = setInterval(() => fetchAllRef.current(), 2000);
 
     function connectWs() {
-      console.log(`[Engine] WebSocket connecting to ${WS_URL}...`);
-
       try {
         const ws = new WebSocket(WS_URL);
 
         ws.onopen = () => {
           console.log("[Engine] WebSocket connected.");
-          // Subscribe to engine data topics
-          const topics = [
-            "status",
-            "ticker",
-            "performance",
-            "throughput",
-            "algorithms",
-            "trades",
-            "risk",
-            "health",
-          ];
-          topics.forEach((topic) => {
-            ws.send(JSON.stringify({ type: "subscribe", topic }));
-            console.log(`[Engine] WS sent subscription: ${topic}`);
-          });
+          update({ wsConnected: true });
+          // Simple connectivity ping; matches the backend's plain-text protocol.
+          ws.send("status");
         };
 
         ws.onmessage = (event: MessageEvent) => {
-          try {
-            const msg = JSON.parse(event.data);
-            console.log("[Engine] WS message:", msg);
+          // Backend replies are plain text (e.g. "running", "stopped",
+          // "subscribed to BTCUSD", "unknown command") — do not JSON.parse.
+          const text = String(event.data);
 
-            // Handle ticker data
-            if (msg.type === "ticker" || msg.topic === "ticker") {
-              const data = msg.data || msg;
-              if (data.symbol && data.price) {
-                setState((prev) => ({
-                  ...prev,
-                  tickerData: {
-                    ...prev.tickerData,
-                    [data.symbol]: {
-                      symbol: data.symbol,
-                      price: data.price,
-                      bid: data.bid || data.price,
-                      ask: data.ask || data.price,
-                      timestamp: Date.now(),
-                    },
-                  },
-                  lastUpdate: Date.now(),
-                }));
-              }
-              return;
-            }
-
-            // Handle engine status updates
-            if (msg.type === "status" || msg.topic === "status") {
-              update({
-                health: {
-                  ...state.health,
-                  status: msg.data?.status || msg.status || "unknown",
-                },
-                engineMetrics: msg.data?.metrics || state.engineMetrics,
-              });
-              return;
-            }
-
-            // Handle algorithm updates
-            if (msg.type === "algorithms" || msg.topic === "algorithms") {
-              update({ algorithms: msg.data || [] });
-              return;
-            }
-
-            // Handle trade updates
-            if (msg.type === "trade" || msg.topic === "trades") {
-              const trades = Array.isArray(msg.data) ? msg.data : [msg.data];
-              setState((prev) => ({
-                ...prev,
-                trades: [...trades, ...prev.trades].slice(0, 100), // Keep last 100 trades
-                lastUpdate: Date.now(),
-              }));
-              return;
-            }
-
-            // Handle performance metrics
-            if (msg.type === "performance" || msg.topic === "performance") {
-              update({ performance: msg.data || {} });
-              return;
-            }
-
-            // Handle throughput metrics
-            if (msg.type === "throughput" || msg.topic === "throughput") {
-              update({ throughput: msg.data || defaultState.throughput });
-              return;
-            }
-
-            // Handle alerts
-            if (msg.type === "alert" || msg.topic === "alerts") {
-              setState((prev) => ({
-                ...prev,
-                alerts: [msg.data, ...prev.alerts].slice(0, 50),
-                lastUpdate: Date.now(),
-              }));
-              return;
-            }
-
-          } catch (err) {
-            console.error("[Engine] Error parsing WebSocket message:", err);
+          if (text === "running" || text === "stopped") {
+            update({
+              health: { ...defaultState.health, ...state.health, status: text },
+            });
+            return;
           }
+
+          if (text.startsWith("subscribed to ")) {
+            console.log(`[Engine] Feed ${text}`);
+            return;
+          }
+
+          if (text === "unknown command") {
+            console.warn("[Engine] Backend did not recognize the last WS command");
+            return;
+          }
+
+          console.log("[Engine] WS message:", text);
         };
 
         ws.onclose = () => {
           console.warn("[Engine] WebSocket closed. Reconnecting in 5s...");
           wsRef.current = null;
-          reconnectTimer.current = setTimeout(connectWs, 5000);
+          update({ wsConnected: false });
+          if (mountedRef.current) {
+            reconnectTimer.current = setTimeout(connectWs, 5000);
+          }
         };
 
-        ws.onerror = (err) => {
-          console.error("[Engine] WebSocket error:", err);
-          ws.close();
+        ws.onerror = () => {
+          // The subsequent onclose handles reconnection; avoid closing twice.
+          console.error("[Engine] WebSocket error");
         };
 
         wsRef.current = ws;
       } catch (err) {
         console.error("[Engine] WebSocket connection error:", err);
-        reconnectTimer.current = setTimeout(connectWs, 5000);
+        if (mountedRef.current) {
+          reconnectTimer.current = setTimeout(connectWs, 5000);
+        }
       }
     }
 
     connectWs();
 
     return () => {
-      console.log("[Engine] Provider unmounting, cleaning up...");
+      mountedRef.current = false;
       if (pollTimer.current) clearInterval(pollTimer.current);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (wsRef.current) {
+        wsRef.current.onclose = null; // prevent reconnect-on-unmount
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [fetchAll, update, state.health, state.engineMetrics]);
+    // Empty deps: this effect must run exactly once on mount. `update` and
+    // `fetchAllRef.current()` are stable; reading `state` directly here was
+    // the bug that caused the socket to be torn down and rebuilt on every
+    // state change (the connection storm you saw in the logs).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // --- Context Value ---
 
@@ -693,6 +734,9 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
     registerAlgo,
     startAlgo,
     stopAlgo,
+    connectFeed,
+    registerUser,
+    subscribeSymbol,
   };
 
   return (

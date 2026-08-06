@@ -284,7 +284,7 @@ export function useDatafeed() {
   return useContext(DatafeedContext);
 }
 
-async function fetchJSON<T = unknown>(url: string, label: string): Promise<T | null> {
+async function fetchJSON<T = unknown>(url: string, label = url): Promise<T | null> {
   try {
     console.log(`[Datafeed] REST fetch: ${label} -> ${url}`);
     const res = await fetch(url, { cache: "no-store" });
