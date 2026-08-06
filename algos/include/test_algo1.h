@@ -11,6 +11,7 @@ public:
     std::string getId() const override;
     void start() override;
     void stop() override;
+    bool isRunning() const override;
 
 private:
     std::string id_;

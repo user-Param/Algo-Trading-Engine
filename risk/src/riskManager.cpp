@@ -65,3 +65,17 @@ RiskCheckResult RiskManager::validateSignal(const Signal& signal) const {
     LOG("RiskManager", "PASSED for " << signal.symbol);
     return {true, ""};
 }
+
+void RiskManager::recordTrade(const Signal& signal) {
+    double notional = signal.price * signal.quantity;
+    total_exposure_ += notional;
+    open_positions_++;
+    LOG("RiskManager", "recordTrade: " << signal.symbol << " notional=" << notional
+        << " exposure=" << total_exposure_ << " positions=" << open_positions_);
+}
+
+double RiskManager::getTotalExposure() const { return total_exposure_; }
+double RiskManager::getDailyPnl() const { return daily_pnl_; }
+double RiskManager::getWeeklyPnl() const { return weekly_pnl_; }
+double RiskManager::getMonthlyPnl() const { return monthly_pnl_; }
+int RiskManager::getOpenPositions() const { return open_positions_; }

@@ -29,6 +29,52 @@ export default function Terminal({ selectedSymbol, onSymbolChange }: TerminalPro
   const [stopLoss, setStopLoss] = useState<string>("");
   const [takeProfit, setTakeProfit] = useState<string>("");
   const [fillPolicy, setFillPolicy] = useState<FillPolicy>("Immediate or Cancel");
+  const [leverage, setLeverage] = useState<number>(1);
+  const [orderStatus, setOrderStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const sendOrder = async (side: 'buy' | 'sell') => {
+  const price = side === 'buy' ? askPrice : bidPrice;
+  if (!selectedSymbol || !price || price <= 0) {
+    setOrderStatus({ message: 'Invalid price or symbol', type: 'error' });
+    return;
+  }
+  const qty = getQuantity();
+  if (qty <= 0) {
+    setOrderStatus({ message: 'Quantity must be > 0', type: 'error' });
+    return;
+  }
+
+  setLoading(true);
+  setOrderStatus(null);
+  try {
+    const payload = {
+      symbol: selectedSymbol,
+      side,
+      price,
+      quantity: qty,
+      leverage,
+      stopLoss: parseFloat(stopLoss) || 0,
+      takeProfit: parseFloat(takeProfit) || 0,
+    };
+    const res = await fetch('http://localhost:8080/api/signals/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'ok') {
+      setOrderStatus({ message: `Order placed (ID: ${data.tradeId})`, type: 'success' });
+    } else {
+      setOrderStatus({ message: data.message || 'Order failed', type: 'error' });
+    }
+  } catch (err) {
+    setOrderStatus({ message: 'Network error', type: 'error' });
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   // --- Real prices from the feed ---
   const ticker = selectedSymbol ? datafeed.tickerData[selectedSymbol] : null;
@@ -47,26 +93,8 @@ export default function Terminal({ selectedSymbol, onSymbolChange }: TerminalPro
     return (capital * quantityPercent) / 100;
   };
 
-  // --- Order Handlers ---
-  const handleSell = () => {
-    const qty = getQuantity();
-    if (qty <= 0) {
-      alert("Please enter a valid quantity.");
-      return;
-    }
-    console.log(`SELL ${qty} ${selectedSymbol} at market price ${bidPrice}`);
-    // API call later
-  };
-
-  const handleBuy = () => {
-    const qty = getQuantity();
-    if (qty <= 0) {
-      alert("Please enter a valid quantity.");
-      return;
-    }
-    console.log(`BUY ${qty} ${selectedSymbol} at market price ${askPrice}`);
-    // API call later
-  };
+  const handleSell = () => sendOrder('sell');
+  const handleBuy = () => sendOrder('buy');
 
   const handleCancel = () => {
     setManualQuantity("");
@@ -186,7 +214,20 @@ export default function Terminal({ selectedSymbol, onSymbolChange }: TerminalPro
           <option value="Immediate or Cancel">Immediate or Cancel</option>
           <option value="Fill or Kill">Fill or Kill</option>
         </select>
+        
       </div>
+
+      <div className="flex items-center gap-2">
+  <label className="text-gray-400 w-20">Leverage</label>
+  <input
+    type="number"
+    value={leverage}
+    onChange={(e) => setLeverage(parseFloat(e.target.value) || 1)}
+    min="1"
+    step="0.5"
+    className="appearance-none bg-[#181818] border border-gray-700 px-3 py-2 w-full"
+  />
+</div>
 
       {/* Price & Action Buttons */}
       <div className="grid grid-cols-2 gap-4 mt-2">
@@ -228,6 +269,11 @@ export default function Terminal({ selectedSymbol, onSymbolChange }: TerminalPro
       >
         Cancel
       </button>
+      {orderStatus && (
+  <div className={`text-center text-xs ${orderStatus.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+    {orderStatus.message}
+  </div>
+)}
     </div>
   );
 }

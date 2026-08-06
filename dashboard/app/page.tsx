@@ -3,49 +3,57 @@
 import Navbar from "./component/navbar";
 import Sidebar from "./component/sidebar";
 import Ticker from "./component/ticker";
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { DatafeedProvider } from "./lib/datafeed-context";
+import { EngineProvider } from "./lib/engine-context";
 import DashboardGrid from './component/dashboardgrid';
 import Card from './cards/card';
 
 // Import cards
 import Chart from "./cards/charts/chart";
-import Performance from "./cards/performance/performance";
-import Latency from "./cards/latency/latency";
-import Health from "./cards/health/health";
-import Throughput from "./cards/throughput/throughput";
-import Pipeline from "./cards/pipeline/pipeline";
-import Pannel from "./cards/pannel/pannel";
-import Network from "./cards/network/network";
-import Database from "./cards/database/database";
-import Event from "./cards/event/event";
 import Insight from "./cards/insight/insight";
-import Config from "./cards/config/config";
-import Session from "./cards/session/session";
+
 import AlgoManager from "./cards/algoManager";
-import Backtest from "./cards/backtest";
+
 import RiskMonitor from "./cards/riskMonitor";
 import TradeHistory from "./cards/tradeHistory";
+import History from "./history/page";
 
 // Import view components
 import Alpha from "./alpha/page";
 import Terminal from "./cards/terminal";
 import Lab from "./lab/page";
 import Inventory from "./inventory/page";
-import Help from "./history/page";
+import Docs from "./docs/page";
 import Positions from "./cards/positions";
 import Orderbook from "./cards/exchange/orderbook";
+import Market from "./market/page"
+import Profile from "./profile/page"
 
 interface CardItem {
   id: string;
   title: string;
 }
 
-type ViewMode = "terminal" | "alpha" | "lab" | "inventory" | "trade-history" | "help";
+type ViewMode = "terminal" | "alpha" | "market" | "lab" | "inventory" | "trade-history" | "docs" | "user";
 
 export default function Home() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const [currentView, setCurrentView] = useState<ViewMode>("terminal");
+  const [currentView, setCurrentView] = useState<ViewMode>(() => {
+    if (typeof window !== "undefined") {
+    const saved = localStorage.getItem("currentView") as ViewMode;
+    return saved || "terminal";
+  }
+  return "terminal";
+});
+
+useEffect(() => {
+    localStorage.setItem("currentView", currentView);
+}, [currentView]);
+
+
+
+
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
 
   const toggleSidebar = () => setSidebarExpanded((prev) => !prev);
@@ -129,7 +137,12 @@ export default function Home() {
         );
       
       case "alpha":
-        return //<Terminal />;
+        return (
+          <Alpha />
+        );
+
+      case "market":
+        return <Market />;
       
       case "lab":
         return <Lab />;
@@ -138,38 +151,51 @@ export default function Home() {
         return <Inventory />;
       
       case "trade-history":
-        return <TradeHistory />;
+        return <History />;
       
-      case "help":
-        return <Help />;
+      case "docs":
+        return <Docs />;
+
+      case "user":
+        return <Profile />;
       
       default:
         return <div>View not found</div>;
     }
   };
 
+
+  const hideSidebarAndTicker = currentView === "alpha" || currentView === "lab" || currentView === "inventory" || currentView === "trade-history" || currentView === "docs" || currentView === "user";
+
   return (
-    <DatafeedProvider>
-      <div className="h-screen flex flex-col bg-[#0a0a0a]">
-        <Navbar currentView={currentView} onViewChange={setCurrentView} />
-        
-        <div className="flex-1 flex overflow-hidden">
-          <div
-            className={`transition-all duration-300 ${
-              sidebarExpanded ? "w-56" : "w-12"
-            } flex-shrink-0 bg-[#0a0a0a] border-r border-gray-800`}
-          >
-            <Sidebar expanded={sidebarExpanded} onToggle={toggleSidebar} />
-          </div>
-          
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <Ticker />
-            <div className="flex-1 overflow-auto p-4">
-              {renderView()}
+    <EngineProvider>
+      <DatafeedProvider>
+        <div className="h-screen flex flex-col bg-[#0a0a0a]">
+          {/* Navbar always visible */}
+          <Navbar currentView={currentView} onViewChange={setCurrentView} />
+
+          <div className="flex-1 flex overflow-hidden">
+            {/* Sidebar – hidden for alpha */}
+            {!hideSidebarAndTicker && (
+              <div
+                className={`transition-all duration-300 ${
+                  sidebarExpanded ? "w-56" : "w-12"
+                } flex-shrink-0 bg-[#0a0a0a] border-r border-gray-800`}
+              >
+                <Sidebar expanded={sidebarExpanded} onToggle={toggleSidebar} />
+              </div>
+            )}
+
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Ticker – hidden for alpha */}
+              {!hideSidebarAndTicker && <Ticker />}
+              <div className="flex-1 overflow-auto p-4">
+                {renderView()}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </DatafeedProvider>
+      </DatafeedProvider>
+    </EngineProvider>
   );
 }

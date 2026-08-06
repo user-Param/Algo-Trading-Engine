@@ -9,10 +9,10 @@ public:
     ~SOR();
 
     void connect_route(const std::string& url);
-    void disconnect_route();
-    bool is_connected() const;
+            void disconnect_route();
+            bool is_connected() const;
 
-    void send_order(uint64_t price, uint64_t quantity, int leverage, const std::string& side);
+    void send_order(double price, double quantity, int leverage, const std::string& side);
     void send_signal(const std::string& signal_json);
 
 private:

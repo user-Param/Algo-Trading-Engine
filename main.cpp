@@ -37,6 +37,16 @@ struct EngineContext {
     bool initialised = false;
 };
 
+struct PositionEntry {
+    std::string symbol;
+    double quantity;
+    double avg_price;
+    double current_price;
+    double pnl;
+    double unrealized_pnl_pct;
+};
+static std::vector<PositionEntry> position_store;
+
 static std::shared_ptr<EngineContext> global_engine;
 
 // In-memory algo tracking
@@ -136,9 +146,12 @@ static std::string json_escape(const std::string& s) {
 }
 
 static std::string extract_json_string(const std::string& json, const std::string& key) {
-    auto p = json.find("\"" + key + "\":\"");
+    auto p = json.find("\"" + key + "\":");
     if (p == std::string::npos) return {};
-    p += key.size() + 4;
+    p += key.size() + 3;
+    while (p < json.size() && (json[p] == ' ' || json[p] == '\t')) p++;
+    if (p >= json.size() || json[p] != '"') return {};
+    p++;
     std::string v;
     while (p < json.size() && json[p] != '"') v += json[p++];
     return v;
@@ -412,6 +425,143 @@ static std::string handle_api_request(const std::string& target, const std::stri
             for (int i = start; i < end; ++i) page_trades.push_back(trade_store[i]);
             return build_trade_list_json(page_trades, total, page, limit);
         }
+        if (path == "/api/orders") {
+    // Parse JSON body (simplified – use a proper JSON library in production)
+    std::string symbol = extract_json_string(body, "symbol");
+    std::string side = extract_json_string(body, "side");
+    double price = extract_json_number(body, "price");
+    double quantity = extract_json_number(body, "quantity");
+    double leverage = extract_json_number(body, "leverage");
+    if (leverage == 0) leverage = 1.0;
+    double stopLoss = extract_json_number(body, "stopLoss");
+    double takeProfit = extract_json_number(body, "takeProfit");
+
+    // Validate required fields
+    if (symbol.empty() || side.empty() || price <= 0 || quantity <= 0) {
+        return R"({"status":"error","message":"Missing required fields"})";
+    }
+
+    // Create Signal
+    Signal sig;
+    sig.symbol = symbol;
+    sig.side = side;
+    sig.price = price;
+    sig.quantity = quantity;
+    sig.leverage = leverage;
+    sig.stopLoss = stopLoss;
+    sig.takeProfit = takeProfit;
+    sig.algoId = "terminal";
+    sig.timestamp = std::time(nullptr);
+
+    // Validate via RiskManager
+    auto result = global_engine->engine.getRiskManager().validateSignal(sig);
+    if (!result.passed) {
+        return R"({"status":"error","message":")" + result.reason + R"("})";
+    }
+
+    // Send to SOR (will store and simulate execution)
+    global_engine->engine.getSOR().send_order(sig.price, sig.quantity, static_cast<int>(sig.leverage), sig.side);
+
+    // Return success (SOR will assign an ID and store)
+    // We could return the trade ID, but for simplicity we just return ok
+    return R"({"status":"ok","message":"Order placed"})";
+}
+
+if (path == "/api/signals/manual") {
+    std::string symbol = extract_json_string(body, "symbol");
+    std::string side = extract_json_string(body, "side");
+    double price = extract_json_number(body, "price");
+    double quantity = extract_json_number(body, "quantity");
+    double leverage = extract_json_number(body, "leverage");
+    if (leverage <= 0) leverage = 1.0;
+    double stopLoss = extract_json_number(body, "stopLoss");
+    double takeProfit = extract_json_number(body, "takeProfit");
+
+    if (symbol.empty() || side.empty() || price <= 0 || quantity <= 0) {
+        return R"({"status":"error","message":"Missing required fields"})";
+    }
+
+    if (!global_engine->engine.isRunning()) {
+        return R"({"status":"error","message":"Engine is not running"})";
+    }
+
+    Signal sig;
+    sig.symbol = symbol;
+    sig.side = side;
+    sig.price = price;
+    sig.quantity = quantity;
+    sig.leverage = leverage;
+    sig.stopLoss = stopLoss;
+    sig.takeProfit = takeProfit;
+    sig.algoId = "manual";
+    sig.timestamp = static_cast<uint64_t>(std::time(nullptr));
+
+    RiskCheckResult result = global_engine->engine.getRiskManager().validateSignal(sig);
+    if (!result.passed) {
+        return R"({"status":"error","message":")" + json_escape(result.reason) + R"("})";
+    }
+
+    // Send to SOR
+    global_engine->engine.getSOR().send_order(sig.price, sig.quantity, static_cast<int>(sig.leverage), sig.side);
+    std::ostringstream oss;
+    oss << R"({"algoId":")" << sig.algoId << R"(","symbol":")" << sig.symbol
+        << R"(","side":")" << sig.side << R"(","price":)" << sig.price
+        << R"(,"quantity":)" << sig.quantity << R"(,"leverage":)" << sig.leverage
+        << R"(})";
+    global_engine->engine.getSOR().send_signal(oss.str());
+
+    // Record trade
+    TradeEntry trade;
+    trade.id = next_trade_id++;
+    trade.algoId = sig.algoId;
+    trade.symbol = sig.symbol;
+    trade.side = sig.side;
+    trade.price = sig.price;
+    trade.quantity = sig.quantity;
+    trade.status = "filled";   // ← FIXED: was "filled" || "pending"
+    trade.created_at = std::to_string(std::time(nullptr));
+    trade.updated_at = trade.created_at;
+    trade_store.push_back(trade);
+
+    // --- Create a new independent position for this trade (no netting) ---
+    PositionEntry pos;
+    pos.symbol = sig.symbol;
+    pos.quantity = (sig.side == "buy") ? sig.quantity : -sig.quantity;
+    pos.avg_price = sig.price;
+    pos.current_price = sig.price;
+    pos.pnl = 0;
+    pos.unrealized_pnl_pct = 0;
+    position_store.push_back(pos);
+
+    return R"({"status":"ok","message":"Signal sent","tradeId":)" + std::to_string(trade.id) + R"(})";
+}
+
+        if (path == "/api/positions") {
+    std::ostringstream oss;
+    oss << R"({"status":"ok","positions":[)";
+    bool first = true;
+    for (const auto& pos : position_store) {
+        if (!first) oss << ",";
+        first = false;
+
+        // Get latest price from feed
+        MarketData md = global_engine->engine.getFeedManager().get_feed(pos.symbol);
+        double current_price = (md.price > 0) ? md.price : pos.current_price;
+
+        double pnl = (current_price - pos.avg_price) * pos.quantity;
+        double pnl_pct = pos.avg_price != 0 ? ((current_price - pos.avg_price) / pos.avg_price) * 100.0 : 0.0;
+
+        oss << R"({"symbol":")" << json_escape(pos.symbol) << R"(")"
+            << R"(,"quantity":)" << pos.quantity
+            << R"(,"avg_price":)" << pos.avg_price
+            << R"(,"current_price":)" << current_price
+            << R"(,"pnl":)" << pnl
+            << R"(,"unrealized_pnl_pct":)" << pnl_pct
+            << R"(})";
+    }
+    oss << R"(]})";
+    return oss.str();
+}
 
         // === 5. Backtest Management (Enhanced) ===
         if (path == "/api/backtest/status") {
@@ -459,6 +609,14 @@ static std::string handle_api_request(const std::string& target, const std::stri
     }
 }
 
+template <class Body>
+void set_cors(http::response<Body>& res)
+{
+    res.set(http::field::access_control_allow_origin, "*");
+    res.set(http::field::access_control_allow_methods, "GET,POST,OPTIONS");
+    res.set(http::field::access_control_allow_headers, "Content-Type");
+}
+
 template <class Body, class Allocator>
 http::message_generator
 handle_request(
@@ -471,6 +629,7 @@ handle_request(
         http::response<http::string_body> res{http::status::bad_request, req.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
+        set_cors(res);
         res.keep_alive(req.keep_alive());
         res.body() = std::string(why);
         res.prepare_payload();
@@ -483,6 +642,7 @@ handle_request(
         http::response<http::string_body> res{http::status::not_found, req.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
+        set_cors(res);
         res.keep_alive(req.keep_alive());
         res.body() = "The resource '" + std::string(target) + "' was not found.";
         res.prepare_payload();
@@ -495,6 +655,7 @@ handle_request(
         http::response<http::string_body> res{http::status::internal_server_error, req.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
+        set_cors(res);
         res.keep_alive(req.keep_alive());
         res.body() = "An error occurred: '" + std::string(what) + "'";
         res.prepare_payload();
@@ -507,11 +668,23 @@ handle_request(
         http::response<http::string_body> res{http::status::ok, req.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "application/json");
+        set_cors(res);
         res.keep_alive(req.keep_alive());
         res.body() = json;
         res.prepare_payload();
         return res;
     };
+
+    // Answer CORS preflight requests
+    if (req.method() == http::verb::options) {
+        http::response<http::empty_body> res{http::status::ok, req.version()};
+        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+        set_cors(res);
+        res.content_length(0);
+        res.keep_alive(req.keep_alive());
+        res.prepare_payload();
+        return res;
+    }
 
     std::string target_str(req.target());
     if (target_str.find("/api/") == 0) {
@@ -553,6 +726,7 @@ handle_request(
         http::response<http::empty_body> res{http::status::ok, req.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, mime_type(path));
+        set_cors(res);
         res.content_length(size);
         res.keep_alive(req.keep_alive());
         return res;
@@ -564,6 +738,7 @@ handle_request(
         std::make_tuple(http::status::ok, req.version())};
     res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
     res.set(http::field::content_type, mime_type(path));
+    set_cors(res);
     res.content_length(size);
     res.keep_alive(req.keep_alive());
     return res;
@@ -646,26 +821,59 @@ private:
         LOG("WSEngine", "Received: " << msg);
         std::string response;
 
-        if (msg == "status") {
-            response = global_engine->engine.isRunning() ? "running" : "stopped";
-            LOG("WSEngine", "Status: " << response);
-        } else if (msg.find("subscribe ") == 0) {
-            std::string symbol = msg.substr(10);
-            global_engine->engine.getFeedManager().subscribe_topics({symbol});
-            subscribed_symbols_.push_back(symbol);
-            response = "subscribed to " + symbol;
-            LOG("WSEngine", "Subscribe: " << symbol);
-        } else if (msg == "start") {
-            global_engine->engine.start();
-            response = "engine started";
-            LOG("WSEngine", "Start command processed");
-        } else if (msg == "stop") {
-            global_engine->engine.stop();
-            response = "engine stopped";
-            LOG("WSEngine", "Stop command processed");
+        std::string type = extract_json_string(msg, "type");
+        if (!type.empty()) {
+            // --- JSON protocol (dashboard) ---
+            if (type == "subscribe") {
+                std::string topic = extract_json_string(msg, "topic");
+                if (topic.empty()) {
+                    response = R"({"type":"error","message":"missing topic"})";
+                } else {
+                    global_engine->engine.getFeedManager().subscribe_topics({topic});
+                    subscribed_symbols_.push_back(topic);
+                    response = R"({"type":"subscribed","topic":")" + json_escape(topic) + R"("})";
+                    LOG("WSEngine", "Subscribe: " << topic);
+                }
+            } else if (type == "status") {
+                response = std::string(R"({"type":"status","data":{"status":")") +
+                            (global_engine->engine.isRunning() ? "running" : "stopped") + R"("}})";
+                LOG("WSEngine", "Status: " << response);
+            } else if (type == "start") {
+                global_engine->engine.start();
+                response = R"({"type":"started","message":"engine started"})";
+                LOG("WSEngine", "Start command processed");
+            } else if (type == "stop") {
+                global_engine->engine.stop();
+                response = R"({"type":"stopped","message":"engine stopped"})";
+                LOG("WSEngine", "Stop command processed");
+            } else {
+                response = R"({"type":"error","message":"unknown command type"})";
+                LOG("WSEngine", "Unknown command type: " << type);
+            }
         } else {
-            response = "unknown command";
-            LOG("WSEngine", "Unknown command: " << msg);
+            // --- Plain-text protocol (test scripts) ---
+            if (msg == "status") {
+                response = std::string(R"({"type":"status","data":{"status":")") +
+                            (global_engine->engine.isRunning() ? "running" : "stopped") + R"("}})";
+                LOG("WSEngine", "Status: " << response);
+            } else if (msg.find("subscribe ") == 0) {
+                std::string symbol = msg.substr(10);
+                global_engine->engine.getFeedManager().subscribe_topics({symbol});
+                subscribed_symbols_.push_back(symbol);
+                response = R"({"type":"subscribed","topic":")" + json_escape(symbol) + R"("})";
+                LOG("WSEngine", "Subscribe: " << symbol);
+            } else if (msg == "start") {
+                global_engine->engine.start();
+                response = R"({"type":"started","message":"engine started"})";
+                LOG("WSEngine", "Start command processed");
+            } else if (msg == "stop") {
+                global_engine->engine.stop();
+                response = R"({"type":"stopped","message":"engine stopped"})";
+                LOG("WSEngine", "Stop command processed");
+            } else {
+                response = R"({"type":"error","message":"unknown command"})";
+                LOG("WSEngine", "Unknown command: " << msg);
+            }
         }
 
         ws_.text(true);

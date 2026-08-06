@@ -22,31 +22,26 @@ export default function Sidebar({ expanded, onToggle }: SidebarProps) {
       {/* Sidebar content – conditionally show labels */}
       <div className="flex flex-col w-full">
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Dashboard</span> : <span className="text-xs">dash</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">Portfolio</button> : <button className="text-xs border border-gray-600 w-full">port</button>}
         </div>
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">Performance</button> : <button className="text-xs border border-gray-600 w-full">perf</button>}
         </div>
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">Latency</button> : <button className="text-xs border border-gray-600 w-full">lat</button>}
         </div>
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">Window</button> : <button className="text-xs border border-gray-600 w-full">win</button>}
         </div>
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">Inventory</button> : <button className="text-xs border border-gray-600 w-full">inv</button>}
         </div>
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">System</button> : <button className="text-xs border border-gray-600 w-full">sys</button>}
         </div>
         <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
+          {expanded ? <button className="text-sm px-2 bg-[#161616] border border-gray-600 w-full">Settings</button> : <button className="text-xs border border-gray-600 w-full">sett</button>}
         </div>
-        <div className="w-full px-2 py-1">
-          {expanded ? <span className="text-sm px-2 bg-[#161616]">Settings</span> : <span className="text-xs">sett</span>}
-        </div>
-
-        {/* Add more items as needed */}
       </div>
     </div>
   );

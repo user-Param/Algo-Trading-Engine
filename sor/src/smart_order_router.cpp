@@ -1,13 +1,9 @@
 #include "../include/smart_order_router.h"
-#include "common/include/logger.h"
 #include <iostream>
 
-SOR::SOR() : connected_(false) {
-    LOG("SOR", "Constructed");
-}
+SOR::SOR() : connected_(false) {}
 
 SOR::~SOR() {
-    LOG("SOR", "Destroying");
     disconnect_route();
 }
 
@@ -15,34 +11,34 @@ void SOR::connect_route(const std::string& url) {
     try {
         route_url_ = url;
         connected_ = true;
-        LOG("SOR", "Connected to route: " << url);
+        std::cout << "SOR: Connected to route " << url << std::endl;
     } catch (const std::exception& e) {
-        ERR("SOR", "Failed to connect: " << e.what());
+        std::cerr << "SOR: Failed to connect: " << e.what() << std::endl;
     }
 }
 
 void SOR::disconnect_route() {
     connected_ = false;
-    LOG("SOR", "Disconnected from route");
+    std::cout << "SOR: Disconnected from route" << std::endl;
 }
 
 bool SOR::is_connected() const {
     return connected_;
 }
 
-void SOR::send_order(uint64_t price, uint64_t quantity, int leverage, const std::string& side) {
+void SOR::send_order(double price, double quantity, int leverage, const std::string& side) {
     try {
-        LOG("SOR", "Order sent - " << side << " " << quantity << " @ " << price
-            << " (leverage: " << leverage << "x)");
+        std::cout << "SOR: Order sent - " << side << " " << quantity << " @ " << price
+                  << " (leverage: " << leverage << "x)" << std::endl;
     } catch (const std::exception& e) {
-        ERR("SOR", "Failed to send order: " << e.what());
+        std::cout << "SOR: Failed to send order: " << e.what() << std::endl;
     }
 }
 
 void SOR::send_signal(const std::string& signal_json) {
     try {
-        LOG("SOR", "Publishing signal: " << signal_json);
+        std::cout << "SOR: Publishing signal: " << signal_json << std::endl;
     } catch (const std::exception& e) {
-        ERR("SOR", "Failed to publish signal: " << e.what());
+        std::cout << "SOR: Failed to publish signal: " << e.what() << std::endl;
     }
 }

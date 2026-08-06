@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-type ViewMode = "alpha" | "terminal" | "lab" | "inventory" | "trade-history" | "help";
+type ViewMode = "alpha" | "market" | "terminal" | "lab" | "inventory" | "trade-history" | "docs" | "user";
 
 interface NavbarProps {
   currentView?: ViewMode;
@@ -16,11 +16,13 @@ export default function Navbar({
 
   const navItems: { id: ViewMode; label: string }[] = [
     { id: "alpha", label: "Alpha" },
+    { id: "market", label: "Market" },
     { id: "terminal", label: "Terminal" },
     { id: "lab", label: "Lab" },
     { id: "inventory", label: "Inventory" },
     { id: "trade-history", label: "Trade History" },
-    { id: "help", label: "Help" },
+    { id: "docs", label: "Docs" },
+    { id: "user", label: "user" },
   ];
 
   const[isRunning, setIsRunning] = useState(false);
@@ -29,48 +31,22 @@ export default function Navbar({
   }
 
   return (
-    <div className="bg-[#101010] text-white p-4 w-full max-h-16 flex items-center justify-between">
-      <div className="flex gap-3">
-        <h1 className="text-xl font-bold">Protype</h1>
+    <div className="text-white p-4 w-full min-h-48 flex items-center justify-center">
+      <div className="flex gap-8">
+        <h1 className="text-6xl font-bold">Protype</h1>
         {navItems.map((item) => (
           <button
             key={item.id}
             onClick={() => onViewChange(item.id)}
-            className={`rounded px-4 py-1 transition-colors ${
+            className={`px-4 transition-colors ${
               currentView === item.id
-                ? "bg-[#242424] text-white"
-                : "bg-[#161616] hover:bg-[#252525]"
+                ? " text-white"
+                : " hover:bg-[#252525]"
             }`}
           >
             {item.label}
           </button>
         ))}
-      </div>
-      <div className="flex gap-3">
-        <button className="bg-[#161616] rounded px-8 border"
-          onClick={handleClick}
-          >
-          {isRunning ? "Stop" : "Start"}
-        </button>
-        <span className="bg-[#161616] rounded px-4">
-          Exchange {"-"}
-        </span>
-        <span className="bg-[#161616] rounded px-4">
-          Network {"-"}
-        </span>
-        <span className="bg-[#161616] rounded px-4">
-          Health {"-"}
-        </span>
-        <span className="bg-[#161616] rounded px-4">
-          Connections {"-"}
-        </span>
-        <span className="bg-[#161616] rounded px-4">
-          Latency {"-"}
-        </span>
-        <span className="bg-[#161616] rounded px-4">
-          Alerts {"-"}
-        </span>
-        <span className="bg-[#161616] rounded px-4">Param</span>
       </div>
     </div>
   );

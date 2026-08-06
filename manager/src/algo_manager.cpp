@@ -1,5 +1,6 @@
 #include "../include/algo_manager.h"
 #include "common/include/logger.h"
+#include <ctime>
 #include <iostream>
 
 AlgoManager::AlgoManager() {
@@ -13,6 +14,21 @@ AlgoManager::~AlgoManager() {
 void AlgoManager::setFeedManager(FeedManager* fm) {
     feed_manager_ = fm;
     LOG("AlgoManager", "FeedManager set");
+}
+
+void AlgoManager::setRiskManager(RiskManager* rm) {
+    risk_manager_ = rm;
+    LOG("AlgoManager", "RiskManager set");
+}
+
+void AlgoManager::setSOR(SOR* sor) {
+    sor_ = sor;
+    LOG("AlgoManager", "SOR set");
+}
+
+void AlgoManager::setTradeCallback(TradeCallback cb) {
+    trade_callback_ = std::move(cb);
+    LOG("AlgoManager", "Trade callback set");
 }
 
 void AlgoManager::registerAlgoType(const std::string& type, AlgoFactory factory) {
@@ -89,5 +105,34 @@ std::vector<std::string> AlgoManager::listAlgos() const {
 void AlgoManager::onMarketData(const std::string& symbol, const MarketData& data) {
     for (auto& pair : algos_) {
         pair.second->onMarketData(symbol, data);
+
+        if (!pair.second->isRunning())
+            continue;
+
+        Signal sig = pair.second->generateSignal();
+        sig.timestamp = static_cast<uint64_t>(data.timestamp > 0 ? data.timestamp : std::time(nullptr));
+
+        RiskCheckResult result{true, ""};
+        if (risk_manager_)
+            result = risk_manager_->validateSignal(sig);
+
+        if (!result.passed) {
+            LOG("AlgoManager", "Signal from " << sig.algoId << " rejected: " << result.reason);
+            continue;
+        }
+
+        if (sor_) {
+            sor_->send_order(sig.price, sig.quantity,
+                             static_cast<int>(sig.leverage), sig.side);
+            sor_->send_signal(R"({"algoId":")" + sig.algoId +
+                              R"(","symbol":")" + sig.symbol +
+                              R"(","side":")" + sig.side +
+                              R"(","price":)" + std::to_string(sig.price) +
+                              R"(,"quantity":)" + std::to_string(sig.quantity) +
+                              R"(,"leverage":)" + std::to_string(sig.leverage) + R"(})");
+        }
+
+        if (trade_callback_)
+            trade_callback_(sig);
     }
 }

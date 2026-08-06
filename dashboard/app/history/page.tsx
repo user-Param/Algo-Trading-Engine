@@ -1,3 +1,3 @@
 export default function History(){
-	return(<>History jahjhdjahdjshdjhsjdhshdjhsdhsjhdjhshd</>)
+	return(<>Trade History</>)
 };
